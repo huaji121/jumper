@@ -4,11 +4,13 @@ import (
 	"github.com/Zyko0/go-sdl3/sdl"
 )
 
-// TileDef defines a tile type: its animated sprite and collision flag.
-// Multiple grid cells can share the same TileDef instance.
+// TileDef defines a tile type: its animated sprite, collision behaviour,
+// and optional rotation (degrees — used for spike orientation and rendering).
 type TileDef struct {
-	Sprite *AnimatedSprite
-	Solid  bool
+	Sprite   *AnimatedSprite
+	Solid    bool
+	Spike    bool
+	Rotation float64
 }
 
 // TileMap is a grid-based map supporting animated tiles.
@@ -16,8 +18,8 @@ type TileDef struct {
 type TileMap struct {
 	Defs                  []*TileDef
 	Grid                  [][]int
-	Width, Height         int   // grid dimensions in tiles
-	TileWidth, TileHeight int32 // pixel size of one tile
+	Width, Height         int
+	TileWidth, TileHeight int32
 }
 
 // NewTileMap creates an empty tilemap with every cell set to -1 (empty).
@@ -69,6 +71,24 @@ func (tm *TileMap) IsSolid(x, y int) bool {
 	return tm.Defs[idx].Solid
 }
 
+// IsSpike reports whether the tile at (x, y) exists and is a spike.
+func (tm *TileMap) IsSpike(x, y int) bool {
+	idx := tm.GetTile(x, y)
+	if idx < 0 || idx >= len(tm.Defs) {
+		return false
+	}
+	return tm.Defs[idx].Spike
+}
+
+// SpikeRotation returns the rotation angle for a spike tile, or 0.
+func (tm *TileMap) SpikeRotation(x, y int) float64 {
+	idx := tm.GetTile(x, y)
+	if idx < 0 || idx >= len(tm.Defs) {
+		return 0
+	}
+	return tm.Defs[idx].Rotation
+}
+
 // Update advances all tile sprite animations by dt ms.
 func (tm *TileMap) Update(dt int64) {
 	for _, def := range tm.Defs {
@@ -109,8 +129,17 @@ func (tm *TileMap) Render(renderer *sdl.Renderer, cam *Camera) {
 			}
 			sx := float32(float64(col)*float64(tm.TileWidth) - cam.X)
 			sy := float32(float64(row)*float64(tm.TileHeight) - cam.Y)
+
+			flip := sdl.FLIP_NONE
+			angle := 0.0
+			if def.Rotation == 180 {
+				flip = sdl.FLIP_VERTICAL
+			} else if def.Rotation != 0 {
+				angle = def.Rotation
+			}
+
 			def.Sprite.Render(renderer, sx, sy,
-				float32(tm.TileWidth), float32(tm.TileHeight), sdl.FLIP_NONE)
+				float32(tm.TileWidth), float32(tm.TileHeight), flip, angle)
 		}
 	}
 }

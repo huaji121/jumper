@@ -197,7 +197,7 @@ func (p *Player) Render(renderer *sdl.Renderer, cam *Camera) {
 		flip = sdl.FLIP_HORIZONTAL
 	}
 
-	p.Sprite.Render(renderer, float32(rx), float32(ry), float32(rw), float32(rh), flip)
+	p.Sprite.Render(renderer, float32(rx), float32(ry), float32(rw), float32(rh), flip, 0)
 }
 
 // CenterX returns the world X of the player's center.
@@ -208,6 +208,118 @@ func (p *Player) CenterX() float64 {
 // CenterY returns the world Y of the player's center.
 func (p *Player) CenterY() float64 {
 	return p.Y + float64(p.Height)/2
+}
+
+// CheckSpikeHit tests whether the player's collision rectangle overlaps a
+// spike tile's triangular danger zone.  The triangle has its apex at
+// (centre, 3/4 height) and base spanning the full tile bottom.
+func (p *Player) CheckSpikeHit(tileMap *TileMap) bool {
+	rect := rectVertices(p.X, p.Y, float64(p.Width), float64(p.Height))
+	for _, tc := range tileMap.GetTilesInRect(p.X, p.Y, float64(p.Width), float64(p.Height)) {
+		if !tileMap.IsSpike(tc[0], tc[1]) {
+			continue
+		}
+		tx, ty := tileMap.TileToPixel(tc[0], tc[1])
+		tw := float64(tileMap.TileWidth)
+		th := float64(tileMap.TileHeight)
+		rot := tileMap.SpikeRotation(tc[0], tc[1])
+
+		// Build the triangle for the current rotation.
+		// Apex is 16 px from the tile edge opposite the base.
+		const spikeTip = 16
+		var tri [][2]float64
+		switch rot {
+		case 90:
+			// Apex at right edge, base at left edge (full height).
+			tri = [][2]float64{
+				{tx + tw - spikeTip, ty + th/2}, // apex
+				{tx, ty},                         // top-left
+				{tx, ty + th},                    // bottom-left
+			}
+		case 180:
+			// Apex near bottom, base at top (ceiling spike).
+			tri = [][2]float64{
+				{tx + tw/2, ty + th - spikeTip}, // apex
+				{tx, ty},                         // top-left
+				{tx + tw, ty},                    // top-right
+			}
+		case 270:
+			// Apex at left edge, base at right edge (full height).
+			tri = [][2]float64{
+				{tx + spikeTip, ty + th/2}, // apex
+				{tx + tw, ty},              // top-right
+				{tx + tw, ty + th},         // bottom-right
+			}
+		default:
+			// 0° — apex 16 px from top, base at bottom (floor spike).
+			tri = [][2]float64{
+				{tx + tw/2, ty + spikeTip}, // apex
+				{tx, ty + th},              // bottom-left
+				{tx + tw, ty + th},         // bottom-right
+			}
+		}
+		if convexPolygonsOverlap(rect, tri) {
+			return true
+		}
+	}
+	return false
+}
+
+// rectVertices returns the four corners of an AABB.
+func rectVertices(x, y, w, h float64) [][2]float64 {
+	return [][2]float64{
+		{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h},
+	}
+}
+
+// convexPolygonsOverlap checks two convex polygons for overlap using SAT.
+func convexPolygonsOverlap(a, b [][2]float64) bool {
+	// Collect all edge normals from both polygons.
+	axes := edgeNormals(a)
+	axes = append(axes, edgeNormals(b)...)
+
+	for _, axis := range axes {
+		minA, maxA := projectPolygon(a, axis)
+		minB, maxB := projectPolygon(b, axis)
+		if maxA < minB || maxB < minA {
+			return false // separating axis found → no overlap
+		}
+	}
+	return true // all axes overlap → polygons intersect
+}
+
+// edgeNormals returns perpendicular vectors for each edge of the polygon.
+func edgeNormals(verts [][2]float64) [][2]float64 {
+	n := len(verts)
+	out := make([][2]float64, 0, n)
+	for i := 0; i < n; i++ {
+		j := (i + 1) % n
+		dx := verts[j][0] - verts[i][0]
+		dy := verts[j][1] - verts[i][1]
+		// Perpendicular: (-dy, dx)
+		length := dx*dx + dy*dy
+		if length == 0 {
+			continue
+		}
+		out = append(out, [2]float64{-dy, dx})
+	}
+	return out
+}
+
+// projectPolygon projects all vertices onto axis, returning (min, max).
+func projectPolygon(verts [][2]float64, axis [2]float64) (float64, float64) {
+	min := verts[0][0]*axis[0] + verts[0][1]*axis[1]
+	max := min
+	for _, v := range verts[1:] {
+		proj := v[0]*axis[0] + v[1]*axis[1]
+		if proj < min {
+			min = proj
+		}
+		if proj > max {
+			max = proj
+		}
+	}
+	return min, max
 }
 
 // Respawn teleports the player to a new position and resets physics state.

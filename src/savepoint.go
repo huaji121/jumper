@@ -63,7 +63,7 @@ func (sp *SavePoint) Render(renderer *sdl.Renderer, cam *Camera) {
 	if sp.Activated {
 		spr = sp.activatedSpr
 	}
-	spr.Render(renderer, sx, sy, float32(sp.W), float32(sp.H), sdl.FLIP_NONE)
+	spr.Render(renderer, sx, sy, float32(sp.W), float32(sp.H), sdl.FLIP_NONE, 0)
 }
 
 // CenterX returns the world X of the save point's centre.

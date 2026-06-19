@@ -108,15 +108,15 @@ func (s *AnimatedSprite) CurrentFrame() *sdl.FRect {
 }
 
 // Render draws the sprite at the given screen position and size.
-// flip controls horizontal/vertical mirroring.
-func (s *AnimatedSprite) Render(renderer *sdl.Renderer, x, y, w, h float32, flip sdl.FlipMode) {
+// flip controls horizontal/vertical mirroring; angle rotates around the
+// sprite centre (degrees, counter-clockwise).
+func (s *AnimatedSprite) Render(renderer *sdl.Renderer, x, y, w, h float32, flip sdl.FlipMode, angle float64) {
 	src := s.CurrentFrame()
 	dst := &sdl.FRect{X: x, Y: y, W: w, H: h}
-	if flip == sdl.FLIP_NONE {
+	if flip == sdl.FLIP_NONE && angle == 0 {
 		renderer.RenderTexture(s.Texture, src, dst)
 	} else {
-		// Rotation of 0 with a flip gives us mirrored rendering.
-		center := &sdl.FPoint{X: 0, Y: 0}
-		renderer.RenderTextureRotated(s.Texture, src, dst, 0, center, flip)
+		center := &sdl.FPoint{X: w / 2, Y: h / 2}
+		renderer.RenderTextureRotated(s.Texture, src, dst, angle, center, flip)
 	}
 }

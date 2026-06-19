@@ -22,26 +22,24 @@ type Game struct {
 	Camera    *Camera
 	Running   bool
 	lastTick  uint64
-	unloaders []unloader // native lib handles for cleanup
+	unloaders []unloader
 
 	SavePoints []*SavePoint
-	SpawnX     float64 // current respawn position
+	SpawnX     float64
 	SpawnY     float64
 
-	interactWasHeld bool // prevents repeated interact-key activations per press
+	interactWasHeld bool
 }
 
 // NewGame initialises SDL, loads assets, builds the level, and wires up the
 // player and camera.  Returns a ready-to-run Game, or an error.
 func NewGame() (*Game, error) {
-	// --- SDL native library (embedded DLL extracted to temp) ---
 	sdlLib := binsdl.Load()
 	if err := sdl.Init(sdl.INIT_VIDEO); err != nil {
 		sdlLib.Unload()
 		return nil, fmt.Errorf("sdl.Init: %w", err)
 	}
 
-	// --- SDL_image native library ---
 	imgLib := binimg.Load()
 
 	window, renderer, err := sdl.CreateWindowAndRenderer(
@@ -93,9 +91,15 @@ func NewGame() (*Game, error) {
 	}
 	spActTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
 
+	spikeTex, err := img.LoadTexture(renderer, "assets/textures/spike.png")
+	if err != nil {
+		g.Cleanup()
+		return nil, fmt.Errorf("load spike.png: %w", err)
+	}
+	spikeTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
+
 	// --- Build AnimatedSprites ---
 
-	// Brick: a single-frame "idle" animation covering the whole texture.
 	brickSprite := NewAnimatedSprite(brickTex)
 	brickSprite.AddAnimation(&Animation{
 		Name: "idle",
@@ -105,7 +109,15 @@ func NewGame() (*Game, error) {
 		Loop: true,
 	})
 
-	// Player: register every animation state with a full-texture frame.
+	spikeSprite := NewAnimatedSprite(spikeTex)
+	spikeSprite.AddAnimation(&Animation{
+		Name: "idle",
+		Frames: []AnimationFrame{
+			{X: 0, Y: 0, W: spikeSprite.TexW, H: spikeSprite.TexH, Duration: 0},
+		},
+		Loop: true,
+	})
+
 	playerSprite := NewAnimatedSprite(playerTex)
 	fullFrame := func() AnimationFrame {
 		return AnimationFrame{
@@ -119,8 +131,6 @@ func NewGame() (*Game, error) {
 	playerSprite.AddAnimation(&Animation{Name: "jump", Frames: []AnimationFrame{fullFrame()}, Loop: false})
 	playerSprite.AddAnimation(&Animation{Name: "fall", Frames: []AnimationFrame{fullFrame()}, Loop: false})
 
-	// Save point factory: each gets its own idle + activated sprite pair
-	// so animations are independent.
 	makeSavePointSprites := func() (*AnimatedSprite, *AnimatedSprite) {
 		idle := NewAnimatedSprite(spTex)
 		idle.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
@@ -142,16 +152,35 @@ func NewGame() (*Game, error) {
 	}
 
 	tileMap := NewTileMap(ld.Width, ld.Height, ld.TileSize, ld.TileSize)
-	brickDefIdx := tileMap.AddDef(&TileDef{Sprite: brickSprite, Solid: true})
+
+	// Cache tile-def indices by (type, rotation) so shared defs are reused.
+	tileDefCache := map[string]int{}
+
+	getOrCreateDef := func(tag string, def *TileDef) int {
+		key := fmt.Sprintf("%s:%v", tag, def.Rotation)
+		if idx, ok := tileDefCache[key]; ok {
+			return idx
+		}
+		idx := tileMap.AddDef(def)
+		tileDefCache[key] = idx
+		return idx
+	}
 
 	var savePoints []*SavePoint
 
 	for row, line := range ld.Tiles {
 		for col, ch := range line {
-			kind := ld.Pattern[string(ch)]
-			switch kind {
+			pat, ok := ld.Pattern[string(ch)]
+			if !ok || pat.Type == "" {
+				continue
+			}
+			switch pat.Type {
 			case "bricks":
-				tileMap.SetTile(col, row, brickDefIdx)
+				def := &TileDef{Sprite: brickSprite, Solid: true}
+				tileMap.SetTile(col, row, getOrCreateDef("brick", def))
+			case "spike":
+				def := &TileDef{Sprite: spikeSprite, Spike: true, Rotation: pat.Rotation}
+				tileMap.SetTile(col, row, getOrCreateDef("spike", def))
 			case "save_point":
 				idle, act := makeSavePointSprites()
 				x := float64(col) * float64(ld.TileSize)
@@ -195,7 +224,6 @@ func (g *Game) Run() error {
 	var accumulator int64
 
 	for g.Running {
-		// --- Input ---
 		var event sdl.Event
 		for sdl.PollEvent(&event) {
 			if event.Type == sdl.EVENT_QUIT {
@@ -206,7 +234,6 @@ func (g *Game) Run() error {
 			break
 		}
 
-		// --- Delta time ---
 		now := sdl.Ticks()
 		dt := int64(now - g.lastTick)
 		g.lastTick = now
@@ -214,17 +241,14 @@ func (g *Game) Run() error {
 			dt = MaxDT
 		}
 
-		// --- Fixed-timestep physics ---
 		accumulator += dt
 		for accumulator >= PhysicsDT {
 			g.fixedUpdate()
 			accumulator -= PhysicsDT
 		}
 
-		// --- Render ---
 		g.render()
 
-		// Prevent a tight spin loop.
 		elapsed := int64(sdl.Ticks() - now)
 		if elapsed < 2 {
 			sdl.Delay(1)
@@ -242,37 +266,34 @@ func (g *Game) fixedUpdate() {
 	jump := keys[sdl.SCANCODE_J] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_SPACE]
 	interactKey := keys[sdl.SCANCODE_I]
 
-	// --- Interact key (save points) ---
 	if interactKey && !g.interactWasHeld {
 		g.interactSavePoints()
 	}
 	g.interactWasHeld = interactKey
 
-	// --- Player update ---
 	g.Player.Update(g.TileMap, left, right, jump)
 
-	// --- Save point timers ---
+	// Spike collision check — respawn on contact.
+	if g.Player.CheckSpikeHit(g.TileMap) {
+		g.Player.Respawn(g.SpawnX, g.SpawnY)
+	}
+
 	for _, sp := range g.SavePoints {
 		sp.Update(PhysicsDT)
 	}
 
-	// --- Tile animations ---
 	g.TileMap.Update(PhysicsDT)
 
-	// --- Respawn if fell off the map ---
 	if g.Player.Y > float64(g.TileMap.PixelHeight())+TileSize {
 		g.Player.Respawn(g.SpawnX, g.SpawnY)
 	}
 
-	// --- Camera ---
 	if g.Camera.Mode != "fixed" {
 		g.Camera.SetTarget(g.Player.CenterX(), g.Player.CenterY())
 	}
 	g.Camera.Update(g.TileMap.PixelWidth(), g.TileMap.PixelHeight())
 }
 
-// interactSavePoints checks each save point for proximity and activates the
-// nearest one that is within interaction range.
 func (g *Game) interactSavePoints() {
 	px := g.Player.CenterX()
 	py := g.Player.CenterY()
@@ -286,19 +307,17 @@ func (g *Game) interactSavePoints() {
 				g.SpawnX = sp.CenterX() - float64(PlayerColW)/2
 				g.SpawnY = sp.Y + float64(sp.H) - float64(PlayerColH)
 			}
-			return // only activate the first one in range
+			return
 		}
 	}
 }
 
-// render draws the current frame.
 func (g *Game) render() {
 	g.Renderer.SetDrawColor(30, 30, 50, 255)
 	g.Renderer.Clear()
 
 	g.TileMap.Render(g.Renderer, g.Camera)
 
-	// Save points are behind the player.
 	for _, sp := range g.SavePoints {
 		sp.Render(g.Renderer, g.Camera)
 	}
@@ -308,7 +327,6 @@ func (g *Game) render() {
 	g.Renderer.Present()
 }
 
-// Cleanup releases all SDL resources.  Safe to call more than once.
 func (g *Game) Cleanup() {
 	if g.Renderer != nil {
 		g.Renderer.Destroy()
