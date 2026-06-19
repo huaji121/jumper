@@ -247,7 +247,7 @@ func (g *Game) fixedUpdate() {
 	left := keys[sdl.SCANCODE_A]
 	right := keys[sdl.SCANCODE_D]
 	jump := keys[sdl.SCANCODE_J] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_SPACE]
-	interactKey := keys[sdl.SCANCODE_O]
+	interactKey := keys[sdl.SCANCODE_I]
 
 	// --- Interact key (save points) ---
 	if interactKey && !g.interactWasHeld {
