@@ -26,6 +26,7 @@ type LevelData struct {
 	TileSize    int32             `json:"tileSize"`
 	PlayerSpawn Vec2              `json:"playerSpawn"`
 	Camera      CameraConfig      `json:"camera"`
+	Zoom        float64           `json:"zoom"`
 	Pattern     map[string]string `json:"pattern"`
 	Tiles       []string          `json:"tiles"`
 }

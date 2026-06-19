@@ -56,9 +56,6 @@ func NewGame() (*Game, error) {
 		return nil, fmt.Errorf("CreateWindowAndRenderer: %w", err)
 	}
 
-	renderer.SetLogicalPresentation(ScreenWidth, ScreenHeight, sdl.LOGICAL_PRESENTATION_OVERSCAN)
-	renderer.SetVSync(1)
-
 	g := &Game{
 		Window:    window,
 		Renderer:  renderer,
@@ -168,7 +165,17 @@ func NewGame() (*Game, error) {
 	// --- Player ---
 	player := NewPlayer(playerSprite, ld.PlayerSpawn.X, ld.PlayerSpawn.Y, TileSize)
 
-	cam := NewCamera(ScreenWidth, ScreenHeight)
+	// --- Zoom & presentation ---
+	zoom := ld.Zoom
+	if zoom <= 0 {
+		zoom = 1.0
+	}
+	logicalW := int32(float64(ScreenWidth) / zoom)
+	logicalH := int32(float64(ScreenHeight) / zoom)
+	renderer.SetLogicalPresentation(logicalW, logicalH, sdl.LOGICAL_PRESENTATION_OVERSCAN)
+	renderer.SetVSync(1)
+
+	cam := NewCamera(logicalW, logicalH)
 	if ld.Camera.Mode == "fixed" {
 		cam.SetFixed(ld.Camera.X, ld.Camera.Y)
 	}
