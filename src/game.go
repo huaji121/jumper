@@ -47,7 +47,7 @@ func NewGame() (*Game, error) {
 	window, renderer, err := sdl.CreateWindowAndRenderer(
 		"Jumper",
 		ScreenWidth, ScreenHeight,
-		0,
+		sdl.WINDOW_RESIZABLE,
 	)
 	if err != nil {
 		imgLib.Unload()
@@ -56,7 +56,6 @@ func NewGame() (*Game, error) {
 		return nil, fmt.Errorf("CreateWindowAndRenderer: %w", err)
 	}
 
-	// Enable vsync so the game runs at the display refresh rate.
 	renderer.SetVSync(1)
 
 	g := &Game{
@@ -202,6 +201,12 @@ func (g *Game) Run() error {
 		g.lastTick = now
 		if dt > MaxDT {
 			dt = MaxDT
+		}
+
+		// Keep the camera viewport in sync with the actual window size.
+		if ww, wh, err := g.Window.Size(); err == nil {
+			g.Camera.W = ww
+			g.Camera.H = wh
 		}
 
 		// --- Fixed-timestep physics ---
