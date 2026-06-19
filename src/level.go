@@ -57,6 +57,27 @@ type LevelData struct {
 	Tiles       []string                   `json:"tiles"`
 }
 
+// LevelsList is the JSON format for the level-order manifest.
+type LevelsList struct {
+	Levels []string `json:"levels"`
+}
+
+// LoadLevelsList reads the level-order manifest.
+func LoadLevelsList(path string) (*LevelsList, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var ll LevelsList
+	if err := json.Unmarshal(data, &ll); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if len(ll.Levels) == 0 {
+		return nil, fmt.Errorf("%s: levels list is empty", path)
+	}
+	return &ll, nil
+}
+
 // LoadLevel reads and parses a level JSON file.
 func LoadLevel(path string) (*LevelData, error) {
 	data, err := os.ReadFile(path)

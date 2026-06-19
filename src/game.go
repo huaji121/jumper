@@ -10,10 +10,8 @@ import (
 	"github.com/Zyko0/go-sdl3/sdl"
 )
 
-// unloader is satisfied by both binsdl.library and binimg.library.
 type unloader interface{ Unload() }
 
-// Game owns the top-level SDL resources and orchestrates the game loop.
 type Game struct {
 	Window    *sdl.Window
 	Renderer  *sdl.Renderer
@@ -31,13 +29,23 @@ type Game struct {
 
 	interactWasHeld bool
 
-	congratsSprite  *AnimatedSprite
-	showCongrats    bool
-	congratsTimer   int64
+	congratsSprite *AnimatedSprite
+	congratsTex    *sdl.Texture
+	showCongrats   bool
+	congratsTimer  int64
+
+	brickSprite  *AnimatedSprite
+	spikeSprite  *AnimatedSprite
+	playerSprite *AnimatedSprite
+	flagSprite   *AnimatedSprite
+	spTex        *sdl.Texture
+	spActTex     *sdl.Texture
+
+	levelPaths   []string
+	currentLevel int
+	pendingLevel bool
 }
 
-// NewGame initialises SDL, loads assets, builds the level, and wires up the
-// player and camera.  Returns a ready-to-run Game, or an error.
 func NewGame() (*Game, error) {
 	sdlLib := binsdl.Load()
 	if err := sdl.Init(sdl.INIT_VIDEO); err != nil {
@@ -48,9 +56,7 @@ func NewGame() (*Game, error) {
 	imgLib := binimg.Load()
 
 	window, renderer, err := sdl.CreateWindowAndRenderer(
-		"Jumper",
-		ScreenWidth, ScreenHeight,
-		sdl.WINDOW_RESIZABLE,
+		"Jumper", ScreenWidth, ScreenHeight, sdl.WINDOW_RESIZABLE,
 	)
 	if err != nil {
 		imgLib.Unload()
@@ -60,181 +66,170 @@ func NewGame() (*Game, error) {
 	}
 
 	g := &Game{
-		Window:    window,
-		Renderer:  renderer,
-		Running:   true,
-		lastTick:  sdl.Ticks(),
+		Window:   window,
+		Renderer: renderer,
+		Running:  true,
+		lastTick: sdl.Ticks(),
 		unloaders: []unloader{sdlLib, imgLib},
 	}
 
-	// --- Load textures ---
-	brickTex, err := img.LoadTexture(renderer, "assets/textures/bricks.png")
-	if err != nil {
-		g.Cleanup()
-		return nil, fmt.Errorf("load bricks.png: %w", err)
-	}
-	brickTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
-
-	playerTex, err := img.LoadTexture(renderer, "assets/textures/player.png")
-	if err != nil {
-		g.Cleanup()
-		return nil, fmt.Errorf("load player.png: %w", err)
-	}
-	playerTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
-
-	spTex, err := img.LoadTexture(renderer, "assets/textures/save_point.png")
-	if err != nil {
-		g.Cleanup()
-		return nil, fmt.Errorf("load save_point.png: %w", err)
-	}
-	spTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
-
-	spActTex, err := img.LoadTexture(renderer, "assets/textures/save_point_activated.png")
-	if err != nil {
-		g.Cleanup()
-		return nil, fmt.Errorf("load save_point_activated.png: %w", err)
-	}
-	spActTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
-
-	spikeTex, err := img.LoadTexture(renderer, "assets/textures/spike.png")
-	if err != nil {
-		g.Cleanup()
-		return nil, fmt.Errorf("load spike.png: %w", err)
-	}
-	spikeTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
-
-	flagTex, err := img.LoadTexture(renderer, "assets/textures/flag.png")
-	if err != nil {
-		g.Cleanup()
-		return nil, fmt.Errorf("load flag.png: %w", err)
-	}
-	flagTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
-
-	congratsTex, err := img.LoadTexture(renderer, "assets/textures/congratulations.png")
-	if err != nil {
-		g.Cleanup()
-		return nil, fmt.Errorf("load congratulations.png: %w", err)
-	}
-	congratsTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
-
-	// --- Build AnimatedSprites ---
-
-	brickSprite := NewAnimatedSprite(brickTex)
-	brickSprite.AddAnimation(&Animation{
-		Name: "idle",
-		Frames: []AnimationFrame{
-			{X: 0, Y: 0, W: brickSprite.TexW, H: brickSprite.TexH, Duration: 0},
-		},
-		Loop: true,
-	})
-
-	spikeSprite := NewAnimatedSprite(spikeTex)
-	spikeSprite.AddAnimation(&Animation{
-		Name: "idle",
-		Frames: []AnimationFrame{
-			{X: 0, Y: 0, W: spikeSprite.TexW, H: spikeSprite.TexH, Duration: 0},
-		},
-		Loop: true,
-	})
-
-	playerSprite := NewAnimatedSprite(playerTex)
-	fullFrame := func() AnimationFrame {
-		return AnimationFrame{
-			X: 0, Y: 0,
-			W: playerSprite.TexW, H: playerSprite.TexH,
-			Duration: 0,
-		}
-	}
-	playerSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{fullFrame()}, Loop: true})
-	playerSprite.AddAnimation(&Animation{Name: "run", Frames: []AnimationFrame{fullFrame()}, Loop: true})
-	playerSprite.AddAnimation(&Animation{Name: "jump", Frames: []AnimationFrame{fullFrame()}, Loop: false})
-	playerSprite.AddAnimation(&Animation{Name: "fall", Frames: []AnimationFrame{fullFrame()}, Loop: false})
-
-	flagSprite := NewAnimatedSprite(flagTex)
-	flagSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
-		{X: 0, Y: 0, W: flagSprite.TexW, H: flagSprite.TexH, Duration: 0},
-	}, Loop: true})
-
-	congratsSprite := NewAnimatedSprite(congratsTex)
-	congratsSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
-		{X: 0, Y: 0, W: congratsSprite.TexW, H: congratsSprite.TexH, Duration: 0},
-	}, Loop: true})
-
-	makeSavePointSprites := func() (*AnimatedSprite, *AnimatedSprite) {
-		idle := NewAnimatedSprite(spTex)
-		idle.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
-			{X: 0, Y: 0, W: idle.TexW, H: idle.TexH, Duration: 0},
-		}, Loop: true})
-
-		act := NewAnimatedSprite(spActTex)
-		act.AddAnimation(&Animation{Name: "activated", Frames: []AnimationFrame{
-			{X: 0, Y: 0, W: act.TexW, H: act.TexH, Duration: 0},
-		}, Loop: true})
-		return idle, act
-	}
-
-	// --- Load level from JSON ---
-	ld, err := LoadLevel("assets/levels/level1.json")
+	ll, err := LoadLevelsList("assets/levels/levels.json")
 	if err != nil {
 		g.Cleanup()
 		return nil, err
 	}
+	g.levelPaths = ll.Levels
+
+	if err := g.loadTextures(); err != nil {
+		g.Cleanup()
+		return nil, err
+	}
+
+	if err := g.switchToLevel(0); err != nil {
+		g.Cleanup()
+		return nil, err
+	}
+
+	return g, nil
+}
+
+func (g *Game) loadTextures() error {
+	t, err := img.LoadTexture(g.Renderer, "assets/textures/bricks.png")
+	if err != nil {
+		return fmt.Errorf("load bricks.png: %w", err)
+	}
+	t.SetScaleMode(sdl.SCALEMODE_NEAREST)
+	g.brickSprite = NewAnimatedSprite(t)
+	g.brickSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+		{X: 0, Y: 0, W: g.brickSprite.TexW, H: g.brickSprite.TexH, Duration: 0},
+	}, Loop: true})
+
+	t, err = img.LoadTexture(g.Renderer, "assets/textures/player.png")
+	if err != nil {
+		return fmt.Errorf("load player.png: %w", err)
+	}
+	t.SetScaleMode(sdl.SCALEMODE_NEAREST)
+	g.playerSprite = NewAnimatedSprite(t)
+	ff := func() AnimationFrame {
+		return AnimationFrame{X: 0, Y: 0, W: g.playerSprite.TexW, H: g.playerSprite.TexH, Duration: 0}
+	}
+	g.playerSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{ff()}, Loop: true})
+	g.playerSprite.AddAnimation(&Animation{Name: "run", Frames: []AnimationFrame{ff()}, Loop: true})
+	g.playerSprite.AddAnimation(&Animation{Name: "jump", Frames: []AnimationFrame{ff()}, Loop: false})
+	g.playerSprite.AddAnimation(&Animation{Name: "fall", Frames: []AnimationFrame{ff()}, Loop: false})
+
+	g.spTex, err = img.LoadTexture(g.Renderer, "assets/textures/save_point.png")
+	if err != nil {
+		return fmt.Errorf("load save_point.png: %w", err)
+	}
+	g.spTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
+
+	g.spActTex, err = img.LoadTexture(g.Renderer, "assets/textures/save_point_activated.png")
+	if err != nil {
+		return fmt.Errorf("load save_point_activated.png: %w", err)
+	}
+	g.spActTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
+
+	t, err = img.LoadTexture(g.Renderer, "assets/textures/spike.png")
+	if err != nil {
+		return fmt.Errorf("load spike.png: %w", err)
+	}
+	t.SetScaleMode(sdl.SCALEMODE_NEAREST)
+	g.spikeSprite = NewAnimatedSprite(t)
+	g.spikeSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+		{X: 0, Y: 0, W: g.spikeSprite.TexW, H: g.spikeSprite.TexH, Duration: 0},
+	}, Loop: true})
+
+	t, err = img.LoadTexture(g.Renderer, "assets/textures/flag.png")
+	if err != nil {
+		return fmt.Errorf("load flag.png: %w", err)
+	}
+	t.SetScaleMode(sdl.SCALEMODE_NEAREST)
+	g.flagSprite = NewAnimatedSprite(t)
+	g.flagSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+		{X: 0, Y: 0, W: g.flagSprite.TexW, H: g.flagSprite.TexH, Duration: 0},
+	}, Loop: true})
+
+	g.congratsTex, err = img.LoadTexture(g.Renderer, "assets/textures/congratulations.png")
+	if err != nil {
+		return fmt.Errorf("load congratulations.png: %w", err)
+	}
+	g.congratsTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
+	g.congratsSprite = NewAnimatedSprite(g.congratsTex)
+	g.congratsSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+		{X: 0, Y: 0, W: g.congratsSprite.TexW, H: g.congratsSprite.TexH, Duration: 0},
+	}, Loop: true})
+
+	return nil
+}
+
+func (g *Game) switchToLevel(idx int) error {
+	if idx < 0 || idx >= len(g.levelPaths) {
+		return fmt.Errorf("level index %d out of range", idx)
+	}
+	g.currentLevel = idx
+	g.pendingLevel = false
+
+	ld, err := LoadLevel(g.levelPaths[idx])
+	if err != nil {
+		return err
+	}
 
 	tileMap := NewTileMap(ld.Width, ld.Height, ld.TileSize, ld.TileSize)
-
-	// Cache tile-def indices by (type, rotation) so shared defs are reused.
 	tileDefCache := map[string]int{}
 
 	getOrCreateDef := func(tag string, def *TileDef) int {
 		key := fmt.Sprintf("%s:%v", tag, def.Rotation)
-		if idx, ok := tileDefCache[key]; ok {
-			return idx
+		if i, ok := tileDefCache[key]; ok {
+			return i
 		}
-		idx := tileMap.AddDef(def)
-		tileDefCache[key] = idx
-		return idx
+		i := tileMap.AddDef(def)
+		tileDefCache[key] = i
+		return i
 	}
 
 	var savePoints []*SavePoint
+	var flags []*Flag
 
 	for row, line := range ld.Tiles {
 		for col, ch := range line {
 			pat, ok := ld.Pattern[string(ch)]
 			if !ok || pat.Type == "" {
 				continue
-		}
+			}
 			switch pat.Type {
 			case "bricks":
-				def := &TileDef{Sprite: brickSprite, Solid: true}
-				tileMap.SetTile(col, row, getOrCreateDef("brick", def))
+				tileMap.SetTile(col, row, getOrCreateDef("brick", &TileDef{Sprite: g.brickSprite, Solid: true}))
 			case "spike":
-				def := &TileDef{Sprite: spikeSprite, Spike: true, Rotation: pat.Rotation}
-				tileMap.SetTile(col, row, getOrCreateDef("spike", def))
+				tileMap.SetTile(col, row, getOrCreateDef("spike", &TileDef{Sprite: g.spikeSprite, Spike: true, Rotation: pat.Rotation}))
 			case "flag":
-				f := NewFlag(flagSprite, float64(col)*float64(ld.TileSize), float64(row)*float64(ld.TileSize), ld.TileSize)
-				g.Flags = append(g.Flags, f)
+				f := NewFlag(g.flagSprite, float64(col)*float64(ld.TileSize), float64(row)*float64(ld.TileSize), ld.TileSize)
+				flags = append(flags, f)
 			case "save_point":
-				idle, act := makeSavePointSprites()
-				x := float64(col) * float64(ld.TileSize)
-				y := float64(row) * float64(ld.TileSize)
-				sp := NewSavePoint(idle, act, x, y, ld.TileSize)
+				idle := NewAnimatedSprite(g.spTex)
+				idle.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+					{X: 0, Y: 0, W: idle.TexW, H: idle.TexH, Duration: 0},
+				}, Loop: true})
+				act := NewAnimatedSprite(g.spActTex)
+				act.AddAnimation(&Animation{Name: "activated", Frames: []AnimationFrame{
+					{X: 0, Y: 0, W: act.TexW, H: act.TexH, Duration: 0},
+				}, Loop: true})
+				sp := NewSavePoint(idle, act, float64(col)*float64(ld.TileSize), float64(row)*float64(ld.TileSize), ld.TileSize)
 				savePoints = append(savePoints, sp)
-		}
+			}
 		}
 	}
 
-	// --- Player ---
-	player := NewPlayer(playerSprite, ld.PlayerSpawn.X, ld.PlayerSpawn.Y, TileSize)
+	player := NewPlayer(g.playerSprite, ld.PlayerSpawn.X, ld.PlayerSpawn.Y, TileSize)
 
-	// --- Zoom & presentation ---
 	zoom := ld.Zoom
 	if zoom <= 0 {
 		zoom = 1.0
 	}
 	logicalW := int32(float64(ScreenWidth) / zoom)
 	logicalH := int32(float64(ScreenHeight) / zoom)
-	renderer.SetLogicalPresentation(logicalW, logicalH, sdl.LOGICAL_PRESENTATION_OVERSCAN)
-	renderer.SetVSync(1)
+	g.Renderer.SetLogicalPresentation(logicalW, logicalH, sdl.LOGICAL_PRESENTATION_OVERSCAN)
+	g.Renderer.SetVSync(1)
 
 	cam := NewCamera(logicalW, logicalH)
 	if ld.Camera.Mode == "fixed" {
@@ -245,23 +240,26 @@ func NewGame() (*Game, error) {
 	g.Player = player
 	g.Camera = cam
 	g.SavePoints = savePoints
-	g.congratsSprite = congratsSprite
+	g.Flags = flags
 	g.SpawnX = ld.PlayerSpawn.X
 	g.SpawnY = ld.PlayerSpawn.Y
+	g.showCongrats = false
+	g.interactWasHeld = true
 
-	return g, nil
+	fmt.Printf("[level %d] loaded: %s (spawn: %.0f, %.0f)\n",
+		idx+1, g.levelPaths[idx], g.SpawnX, g.SpawnY)
+
+	return nil
 }
 
-// Run executes the main game loop using a fixed-timestep accumulator.
 func (g *Game) Run() error {
 	var accumulator int64
-
 	for g.Running {
 		var event sdl.Event
 		for sdl.PollEvent(&event) {
 			if event.Type == sdl.EVENT_QUIT {
 				g.Running = false
-		}
+			}
 		}
 		if !g.Running {
 			break
@@ -290,7 +288,6 @@ func (g *Game) Run() error {
 	return nil
 }
 
-// fixedUpdate is called once per physics tick (at PhysicsHz).
 func (g *Game) fixedUpdate() {
 	keys := sdl.GetKeyboardState()
 
@@ -305,19 +302,29 @@ func (g *Game) fixedUpdate() {
 	}
 	g.interactWasHeld = interactKey
 
-	// Congratulations timer.
+	// Congratulations timer — advance to next level when it expires.
 	if g.showCongrats {
 		g.congratsTimer -= PhysicsDT
 		if g.congratsTimer <= 0 {
 			g.showCongrats = false
+			if g.pendingLevel {
+				next := g.currentLevel + 1
+				if next >= len(g.levelPaths) {
+					next = 0
+				}
+				if err := g.switchToLevel(next); err != nil {
+					fmt.Printf("WARNING: level transition failed: %v\n", err)
+					g.pendingLevel = false
+				}
+			}
 		}
 	}
 
 	g.Player.Update(g.TileMap, left, right, jump)
 
-	// Spike collision check — respawn on contact.
 	if g.Player.CheckSpikeHit(g.TileMap) {
-		g.Player.Respawn(g.SpawnX, g.SpawnY)
+		fmt.Printf("[respawn] level %d: (%.0f, %.0f)\n", g.currentLevel+1, g.SpawnX, g.SpawnY)
+	g.Player.Respawn(g.SpawnX, g.SpawnY)
 	}
 
 	for _, sp := range g.SavePoints {
@@ -327,7 +334,8 @@ func (g *Game) fixedUpdate() {
 	g.TileMap.Update(PhysicsDT)
 
 	if g.Player.Y > float64(g.TileMap.PixelHeight())+TileSize {
-		g.Player.Respawn(g.SpawnX, g.SpawnY)
+		fmt.Printf("[respawn] level %d: (%.0f, %.0f)\n", g.currentLevel+1, g.SpawnX, g.SpawnY)
+	g.Player.Respawn(g.SpawnX, g.SpawnY)
 	}
 
 	if g.Camera.Mode != "fixed" {
@@ -340,11 +348,10 @@ func (g *Game) interactFlags() {
 	px := g.Player.CenterX()
 	py := g.Player.CenterY()
 	for _, f := range g.Flags {
-		dx := px - f.CenterX()
-		dy := py - f.CenterY()
-		if math.Sqrt(dx*dx+dy*dy) <= float64(SavePointInteractR) {
+		if math.Sqrt((px-f.CenterX())*(px-f.CenterX())+(py-f.CenterY())*(py-f.CenterY())) <= float64(SavePointInteractR) {
 			g.showCongrats = true
 			g.congratsTimer = 3000
+			g.pendingLevel = true
 			return
 		}
 	}
@@ -353,16 +360,12 @@ func (g *Game) interactFlags() {
 func (g *Game) interactSavePoints() {
 	px := g.Player.CenterX()
 	py := g.Player.CenterY()
-
 	for _, sp := range g.SavePoints {
-		dx := px - sp.CenterX()
-		dy := py - sp.CenterY()
-		dist := math.Sqrt(dx*dx + dy*dy)
-		if dist <= float64(SavePointInteractR) {
+		if math.Sqrt((px-sp.CenterX())*(px-sp.CenterX())+(py-sp.CenterY())*(py-sp.CenterY())) <= float64(SavePointInteractR) {
 			if sp.Activate() {
 				g.SpawnX = sp.CenterX() - float64(PlayerColW)/2
 				g.SpawnY = sp.Y + float64(sp.H) - float64(PlayerColH)
-		}
+			}
 			return
 		}
 	}
@@ -376,20 +379,20 @@ func (g *Game) render() {
 
 	for _, sp := range g.SavePoints {
 		sp.Render(g.Renderer, g.Camera)
-		}
-		for _, f := range g.Flags {
-			f.Render(g.Renderer, g.Camera)
+	}
+	for _, f := range g.Flags {
+		f.Render(g.Renderer, g.Camera)
 	}
 
 	g.Player.Render(g.Renderer, g.Camera)
 
-		if g.showCongrats {
-			cw := float32(g.congratsSprite.TexW)
-			ch := float32(g.congratsSprite.TexH)
-			cx := float32(g.Camera.W)/2 - cw/2
-			cy := float32(g.Camera.H)/2 - ch/2
-			g.congratsSprite.Render(g.Renderer, cx, cy, cw, ch, sdl.FLIP_NONE, 0)
-		}
+	if g.showCongrats {
+		cw := float32(g.congratsSprite.TexW)
+		ch := float32(g.congratsSprite.TexH)
+		cx := float32(g.Camera.W)/2 - cw/2
+		cy := float32(g.Camera.H)/2 - ch/2
+		g.congratsSprite.Render(g.Renderer, cx, cy, cw, ch, sdl.FLIP_NONE, 0)
+	}
 
 	g.Renderer.Present()
 }
