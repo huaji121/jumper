@@ -1,6 +1,8 @@
 package main
 
-import "math"
+import (
+	"math"
+)
 
 type Camera struct {
 	X, Y float64
@@ -18,6 +20,7 @@ type Camera struct {
 	LockX          bool
 	LockY          bool
 	StopThreshold  float64 // snap velocity to zero below this
+	SnapThreshold  float64 // if distance to target < this, snap to target (prevents sub‑pixel jitter)
 
 	// Mode.
 	Mode   string // "follow" or "fixed"
@@ -37,11 +40,12 @@ func NewCamera(w, h int32) *Camera {
 	return &Camera{
 		W:              w,
 		H:              h,
-		Stiffness:      10.0,
-		Damping:        10.0,
-		MaxSpeed:       350.0,
-		DeadZoneRadius: 0.5,
-		StopThreshold:  0.01,
+		Stiffness:      10.0,  // 不变，响应速度
+		Damping:        10.0,  // 增加阻尼，快速衰减
+		MaxSpeed:       450.0, // 不变
+		DeadZoneRadius: 2.5,   // 扩大死区，弹簧在远处才生效
+		StopThreshold:  0.1,   // 速度低于0.1直接归零
+		SnapThreshold:  2.0,   // 位置距离<2像素时吸附
 		Mode:           "follow",
 	}
 }
@@ -125,6 +129,9 @@ func (c *Camera) Update(dt float64, mapPW, mapPH int) {
 	c.X += c.VelX * dt
 	c.Y += c.VelY * dt
 
+	// fmt.Printf("[camera] pos=(%.1f, %.1f) vel=(%.2f, %.2f) target=(%.1f, %.1f)\n",
+	// 	c.X, c.Y, c.VelX, c.VelY, c.TargetX, c.TargetY)
+
 	// Clamp to map bounds.
 	if maxX := float64(mapPW) - float64(c.W); maxX < 0 {
 		c.X = maxX / 2
@@ -151,6 +158,14 @@ func (c *Camera) Update(dt float64, mapPW, mapPH int) {
 			c.Y = maxY
 			c.VelY = 0
 		}
+	}
+
+	// Snap to target if very close – eliminates sub‑pixel jitter when stopped.
+	if math.Abs(c.X-targetX) < c.SnapThreshold && math.Abs(c.Y-targetY) < c.SnapThreshold {
+		c.X = targetX
+		c.Y = targetY
+		c.VelX = 0
+		c.VelY = 0
 	}
 }
 
