@@ -56,6 +56,7 @@ func NewGame() (*Game, error) {
 		return nil, fmt.Errorf("CreateWindowAndRenderer: %w", err)
 	}
 
+	renderer.SetLogicalPresentation(ScreenWidth, ScreenHeight, sdl.LOGICAL_PRESENTATION_OVERSCAN)
 	renderer.SetVSync(1)
 
 	g := &Game{
@@ -204,12 +205,6 @@ func (g *Game) Run() error {
 		g.lastTick = now
 		if dt > MaxDT {
 			dt = MaxDT
-		}
-
-		// Keep the camera viewport in sync with the actual window size.
-		if ww, wh, err := g.Window.Size(); err == nil {
-			g.Camera.W = ww
-			g.Camera.H = wh
 		}
 
 		// --- Fixed-timestep physics ---
