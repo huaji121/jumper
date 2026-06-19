@@ -1,0 +1,21 @@
+# Build output
+*.exe
+*.exe~
+jumper
+src/jumper
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Go
+*.test
+*.out
