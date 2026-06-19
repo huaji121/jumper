@@ -1,29 +1,51 @@
 package main
 
-// Camera represents a viewport that smoothly follows a target or stays fixed.
+import "math"
+
 type Camera struct {
-	X, Y        float64
-	W, H        int32
-	TargetX     float64
-	TargetY     float64
-	FollowSpeed float64 // 0–1 lerp factor per frame
-	Mode        string  // "follow" or "fixed"
-	FixedX      float64 // viewport top-left for fixed mode
-	FixedY      float64
-	initialized bool    // false until first SetTarget / SetFixed
+	X, Y float64
+	W, H int32
+
+	// Spring-damper state.
+	VelX, VelY float64
+
+	// Tunables.
+	Offset         Vector2
+	Stiffness      float64 // spring stiffness (higher = snappier)
+	Damping        float64 // damping coefficient (higher = less overshoot)
+	MaxSpeed       float64 // max camera speed
+	DeadZoneRadius float64 // dead zone radius (no spring force inside)
+	LockX          bool
+	LockY          bool
+	StopThreshold  float64 // snap velocity to zero below this
+
+	// Mode.
+	Mode   string // "follow" or "fixed"
+	FixedX float64
+	FixedY float64
+
+	// Target for follow mode.
+	TargetX float64
+	TargetY float64
+
+	initialized bool
 }
 
-// NewCamera creates a camera with the given viewport dimensions.
+type Vector2 struct{ X, Y float64 }
+
 func NewCamera(w, h int32) *Camera {
 	return &Camera{
-		W:           w,
-		H:           h,
-		FollowSpeed: 0.12,
-		Mode:        "follow",
+		W:              w,
+		H:              h,
+		Stiffness:      10.0,
+		Damping:        10.0,
+		MaxSpeed:       350.0,
+		DeadZoneRadius: 0.5,
+		StopThreshold:  0.01,
+		Mode:           "follow",
 	}
 }
 
-// SetTarget sets the world position for follow mode.
 func (c *Camera) SetTarget(x, y float64) {
 	c.TargetX = x
 	c.TargetY = y
@@ -34,7 +56,6 @@ func (c *Camera) SetTarget(x, y float64) {
 	}
 }
 
-// SetFixed locks the camera centre at a world position (x, y = view centre).
 func (c *Camera) SetFixed(x, y float64) {
 	c.Mode = "fixed"
 	c.FixedX = x - float64(c.W)/2
@@ -42,53 +63,96 @@ func (c *Camera) SetFixed(x, y float64) {
 	c.initialized = true
 }
 
-// SetFollow switches to player-follow mode.
-func (c *Camera) SetFollow() {
-	c.Mode = "follow"
-}
-
-// Update moves the camera toward its target (follow mode) or snaps to the
-// fixed position, then clamps to map bounds.
-func (c *Camera) Update(mapPW, mapPH int) {
+// Update advances the spring-damper simulation by dt seconds.
+func (c *Camera) Update(dt float64, mapPW, mapPH int) {
 	if c.Mode == "fixed" {
 		c.X = c.FixedX
 		c.Y = c.FixedY
-	} else {
-		desiredX := c.TargetX - float64(c.W)/2
-		desiredY := c.TargetY - float64(c.H)/2
-		c.X += (desiredX - c.X) * c.FollowSpeed
-		c.Y += (desiredY - c.Y) * c.FollowSpeed
+		c.VelX = 0
+		c.VelY = 0
+		return
 	}
 
-	// Clamp to map edges, or centre the map when the viewport is larger.
+	targetX := c.TargetX + c.Offset.X - float64(c.W)/2
+	targetY := c.TargetY + c.Offset.Y - float64(c.H)/2
+
+	dx := targetX - c.X
+	dy := targetY - c.Y
+	dist := math.Sqrt(dx*dx + dy*dy)
+
+	if dist < c.DeadZoneRadius {
+		// Inside dead zone: only apply damping, no spring force.
+		c.VelX *= 1.0 - c.Damping*dt
+		c.VelY *= 1.0 - c.Damping*dt
+		vMag := math.Sqrt(c.VelX*c.VelX + c.VelY*c.VelY)
+		if vMag < c.StopThreshold {
+			c.VelX = 0
+			c.VelY = 0
+		}
+	} else {
+		// Spring force: F = stiffness * displacement - damping * velocity.
+		fx := dx*c.Stiffness - c.VelX*c.Damping
+		fy := dy*c.Stiffness - c.VelY*c.Damping
+
+		// Clamp force magnitude.
+		fMag := math.Sqrt(fx*fx + fy*fy)
+		maxForce := c.MaxSpeed * 5
+		if fMag > maxForce {
+			fx = fx / fMag * maxForce
+			fy = fy / fMag * maxForce
+		}
+
+		c.VelX += fx * dt
+		c.VelY += fy * dt
+
+		// Clamp velocity.
+		vMag := math.Sqrt(c.VelX*c.VelX + c.VelY*c.VelY)
+		if vMag > c.MaxSpeed {
+			c.VelX = c.VelX / vMag * c.MaxSpeed
+			c.VelY = c.VelY / vMag * c.MaxSpeed
+		}
+	}
+
+	if c.LockX {
+		c.VelX = 0
+		c.X = targetX
+	}
+	if c.LockY {
+		c.VelY = 0
+		c.Y = targetY
+	}
+
+	c.X += c.VelX * dt
+	c.Y += c.VelY * dt
+
+	// Clamp to map bounds.
 	if maxX := float64(mapPW) - float64(c.W); maxX < 0 {
-		c.X = maxX / 2 // viewport wider than map — centre it
+		c.X = maxX / 2
+		c.VelX = 0
 	} else {
 		if c.X < 0 {
 			c.X = 0
+			c.VelX = 0
 		}
 		if c.X > maxX {
 			c.X = maxX
+			c.VelX = 0
 		}
 	}
 	if maxY := float64(mapPH) - float64(c.H); maxY < 0 {
 		c.Y = maxY / 2
+		c.VelY = 0
 	} else {
 		if c.Y < 0 {
 			c.Y = 0
+			c.VelY = 0
 		}
 		if c.Y > maxY {
 			c.Y = maxY
+			c.VelY = 0
 		}
 	}
 }
 
-// ScreenX converts a world X to a screen X.
-func (c *Camera) ScreenX(worldX float64) float32 {
-	return float32(worldX - c.X)
-}
-
-// ScreenY converts a world Y to a screen Y.
-func (c *Camera) ScreenY(worldY float64) float32 {
-	return float32(worldY - c.Y)
-}
+func (c *Camera) ScreenX(worldX float64) float32 { return float32(worldX - c.X) }
+func (c *Camera) ScreenY(worldY float64) float32 { return float32(worldY - c.Y) }

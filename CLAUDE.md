@@ -29,7 +29,7 @@ The project is a single `main` package in `src/`. Dependencies are managed by `g
 - **Player** — separate collision box (`PlayerColW`/`PlayerColH`, 20×26) and render size (passed at construction, defaults to `TileSize`=32). Physics (gravity, variable-height jump, double-jump) live in `Update()`. Ground detection uses `checkGround()` which explicitly scans tiles below the player's feet — this is the primary ground check, not overlap-based collision. `resolveX`/`resolveY` handle overlap ejection as a backup. On death (spike or fall) the `Dead` flag is set and blood particles burst — press **R** to respawn.
 - **TileMap** — grid of `TileDef` indices (-1 = empty). `TileDef` has an `AnimatedSprite` + `Solid` flag. Renders only visible tiles (camera-frustum culled). `GetTilesInRect()` for AABB queries.
 - **SavePoint** — two separate `AnimatedSprite`s (idle / activated). Activated on interact key (I) within `SavePointInteractR` radius. Timer expires after `SavePointActiveMS` ms. Sets player respawn point.
-- **Camera** — two modes: `"follow"` (lerps toward player centre with `FollowSpeed=0.12`) and `"fixed"` (stays at configured world position). Clamps to map bounds; centres map when viewport is larger than map. Snaps on first `SetTarget` to avoid slow startup lerp.
+- **Camera** — two modes: `"follow"` (spring-damper physics toward player centre: `force = stiffness*dx - damping*velocity`) and `"fixed"` (snaps to configured world position). Supports dead zone, max speed, `LockX`/`LockY`, offset, and stop threshold. Updated every frame with real dt for smooth, physics-based scrolling.
 
 ### Key physics details (constants.go)
 

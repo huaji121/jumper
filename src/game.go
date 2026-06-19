@@ -278,6 +278,12 @@ func (g *Game) Run() error {
 			accumulator -= PhysicsDT
 		}
 
+		// Camera: per-frame exponential follow with real dt for smoothness.
+		if g.Camera.Mode != "fixed" {
+			g.Camera.SetTarget(g.Player.CenterX(), g.Player.CenterY())
+		}
+		g.Camera.Update(float64(dt)/1000.0, g.TileMap.PixelWidth(), g.TileMap.PixelHeight())
+
 		g.render()
 
 		elapsed := int64(sdl.Ticks() - now)
@@ -345,10 +351,7 @@ func (g *Game) fixedUpdate() {
 	g.TileMap.Update(PhysicsDT)
 	g.Particles.Update(PhysicsDT)
 
-	if g.Camera.Mode != "fixed" {
-		g.Camera.SetTarget(g.Player.CenterX(), g.Player.CenterY())
-	}
-	g.Camera.Update(g.TileMap.PixelWidth(), g.TileMap.PixelHeight())
+	// Camera is updated per-frame in Run() for smooth exponential follow.
 }
 
 func (g *Game) interactFlags() {
