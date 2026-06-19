@@ -244,9 +244,9 @@ func (g *Game) Run() error {
 func (g *Game) fixedUpdate() {
 	keys := sdl.GetKeyboardState()
 
-	left := keys[sdl.SCANCODE_LEFT] || keys[sdl.SCANCODE_A]
-	right := keys[sdl.SCANCODE_RIGHT] || keys[sdl.SCANCODE_D]
-	jump := keys[sdl.SCANCODE_SPACE] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_UP]
+	left := keys[sdl.SCANCODE_A]
+	right := keys[sdl.SCANCODE_D]
+	jump := keys[sdl.SCANCODE_J] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_SPACE]
 	eKey := keys[sdl.SCANCODE_E]
 
 	// --- E-key interaction (save points) ---
