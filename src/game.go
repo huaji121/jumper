@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/Zyko0/go-sdl3/bin/binimg"
 	"github.com/Zyko0/go-sdl3/bin/binsdl"
@@ -22,6 +23,12 @@ type Game struct {
 	Running   bool
 	lastTick  uint64
 	unloaders []unloader // native lib handles for cleanup
+
+	SavePoints []*SavePoint
+	SpawnX     float64 // current respawn position
+	SpawnY     float64
+
+	eWasHeld bool // prevents repeated E-key activations per press
 }
 
 // NewGame initialises SDL, loads assets, builds the level, and wires up the
@@ -75,6 +82,20 @@ func NewGame() (*Game, error) {
 	}
 	playerTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
 
+	spTex, err := img.LoadTexture(renderer, "assets/textures/save_point.png")
+	if err != nil {
+		g.Cleanup()
+		return nil, fmt.Errorf("load save_point.png: %w", err)
+	}
+	spTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
+
+	spActTex, err := img.LoadTexture(renderer, "assets/textures/save_point_activated.png")
+	if err != nil {
+		g.Cleanup()
+		return nil, fmt.Errorf("load save_point_activated.png: %w", err)
+	}
+	spActTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
+
 	// --- Build AnimatedSprites ---
 
 	// Brick: a single-frame "idle" animation covering the whole texture.
@@ -88,7 +109,6 @@ func NewGame() (*Game, error) {
 	})
 
 	// Player: register every animation state with a full-texture frame.
-	// When a real spritesheet is available, replace the frame lists here.
 	playerSprite := NewAnimatedSprite(playerTex)
 	fullFrame := func() AnimationFrame {
 		return AnimationFrame{
@@ -101,6 +121,21 @@ func NewGame() (*Game, error) {
 	playerSprite.AddAnimation(&Animation{Name: "run", Frames: []AnimationFrame{fullFrame()}, Loop: true})
 	playerSprite.AddAnimation(&Animation{Name: "jump", Frames: []AnimationFrame{fullFrame()}, Loop: false})
 	playerSprite.AddAnimation(&Animation{Name: "fall", Frames: []AnimationFrame{fullFrame()}, Loop: false})
+
+	// Save point factory: each gets its own idle + activated sprite pair
+	// so animations are independent.
+	makeSavePointSprites := func() (*AnimatedSprite, *AnimatedSprite) {
+		idle := NewAnimatedSprite(spTex)
+		idle.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+			{X: 0, Y: 0, W: idle.TexW, H: idle.TexH, Duration: 0},
+		}, Loop: true})
+
+		act := NewAnimatedSprite(spActTex)
+		act.AddAnimation(&Animation{Name: "activated", Frames: []AnimationFrame{
+			{X: 0, Y: 0, W: act.TexW, H: act.TexH, Duration: 0},
+		}, Loop: true})
+		return idle, act
+	}
 
 	// --- Build tilemap (30×20 tiles at 32 px each → 960×640 world) ---
 	tileMap := NewTileMap(30, 20, TileSize, TileSize)
@@ -137,20 +172,32 @@ func NewGame() (*Game, error) {
 		}
 	}
 
-	// Place the player above ground level (row 16 is the first ground row).
-	player := NewPlayer(playerSprite, 100, float64(14*int(TileSize)-int(playerSprite.TexH)))
+	// --- Player ---
+	startX := 100.0
+	startY := float64(14*int(TileSize) - PlayerColH)
+	player := NewPlayer(playerSprite, startX, startY)
+
+	// --- Save points ---
+	spIdle1, spAct1 := makeSavePointSprites()
+	spIdle2, spAct2 := makeSavePointSprites()
+	spIdle3, spAct3 := makeSavePointSprites()
+	sp1 := NewSavePoint(spIdle1, spAct1, 10*TileSize, 15*TileSize) // ground, left area
+	sp2 := NewSavePoint(spIdle2, spAct2, 20*TileSize, 7*TileSize)  // mid-level platform
+	sp3 := NewSavePoint(spIdle3, spAct3, 5*TileSize, 10*TileSize)  // upper platform
 
 	cam := NewCamera(ScreenWidth, ScreenHeight)
 
 	g.TileMap = tileMap
 	g.Player = player
 	g.Camera = cam
+	g.SavePoints = []*SavePoint{sp1, sp2, sp3}
+	g.SpawnX = startX
+	g.SpawnY = startY
 
 	return g, nil
 }
 
 // Run executes the main game loop using a fixed-timestep accumulator.
-// Physics always advances in PhysicsDT steps regardless of actual framerate.
 func (g *Game) Run() error {
 	var accumulator int64
 
@@ -184,8 +231,7 @@ func (g *Game) Run() error {
 		// --- Render ---
 		g.render()
 
-		// Prevent a tight spin loop: if the frame finished very quickly,
-		// yield the CPU briefly so dt stays in a reasonable range.
+		// Prevent a tight spin loop.
 		elapsed := int64(sdl.Ticks() - now)
 		if elapsed < 2 {
 			sdl.Delay(1)
@@ -201,20 +247,67 @@ func (g *Game) fixedUpdate() {
 	left := keys[sdl.SCANCODE_LEFT] || keys[sdl.SCANCODE_A]
 	right := keys[sdl.SCANCODE_RIGHT] || keys[sdl.SCANCODE_D]
 	jump := keys[sdl.SCANCODE_SPACE] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_UP]
+	eKey := keys[sdl.SCANCODE_E]
 
+	// --- E-key interaction (save points) ---
+	if eKey && !g.eWasHeld {
+		g.interactSavePoints()
+	}
+	g.eWasHeld = eKey
+
+	// --- Player update ---
 	g.Player.Update(g.TileMap, left, right, jump)
+
+	// --- Save point timers ---
+	for _, sp := range g.SavePoints {
+		sp.Update(PhysicsDT)
+	}
+
+	// --- Tile animations ---
 	g.TileMap.Update(PhysicsDT)
 
+	// --- Respawn if fell off the map ---
+	if g.Player.Y > float64(g.TileMap.PixelHeight())+TileSize {
+		g.Player.Respawn(g.SpawnX, g.SpawnY)
+	}
+
+	// --- Camera ---
 	g.Camera.SetTarget(g.Player.CenterX(), g.Player.CenterY())
 	g.Camera.Update(g.TileMap.PixelWidth(), g.TileMap.PixelHeight())
 }
 
+// interactSavePoints checks each save point for proximity and activates the
+// nearest one that is within interaction range.
+func (g *Game) interactSavePoints() {
+	px := g.Player.CenterX()
+	py := g.Player.CenterY()
+
+	for _, sp := range g.SavePoints {
+		dx := px - sp.CenterX()
+		dy := py - sp.CenterY()
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist <= float64(SavePointInteractR) {
+			if sp.Activate() {
+				g.SpawnX = sp.CenterX() - float64(PlayerColW)/2
+				g.SpawnY = sp.Y
+			}
+			return // only activate the first one in range
+		}
+	}
+}
+
 // render draws the current frame.
 func (g *Game) render() {
-	g.Renderer.SetDrawColor(30, 30, 50, 255) // dark blue-ish background
+	g.Renderer.SetDrawColor(30, 30, 50, 255)
 	g.Renderer.Clear()
 
 	g.TileMap.Render(g.Renderer, g.Camera)
+
+	// Save points are behind the player.
+	for _, sp := range g.SavePoints {
+		sp.Render(g.Renderer, g.Camera)
+	}
+
 	g.Player.Render(g.Renderer, g.Camera)
 
 	g.Renderer.Present()
@@ -230,7 +323,6 @@ func (g *Game) Cleanup() {
 		g.Window.Destroy()
 		g.Window = nil
 	}
-	// Shut down SDL before unloading native libraries (Quit calls into them).
 	sdl.Quit()
 	for i := len(g.unloaders) - 1; i >= 0; i-- {
 		g.unloaders[i].Unload()

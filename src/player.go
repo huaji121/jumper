@@ -208,3 +208,14 @@ func (p *Player) CenterX() float64 {
 func (p *Player) CenterY() float64 {
 	return p.Y + float64(p.Height)/2
 }
+
+// Respawn teleports the player to a new position and resets physics state.
+func (p *Player) Respawn(x, y float64) {
+	p.X = x
+	p.Y = y
+	p.VelX = 0
+	p.VelY = 0
+	p.OnGround = false
+	p.JumpsLeft = MaxJumps
+	p.JumpHeld = false
+}
