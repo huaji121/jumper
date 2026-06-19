@@ -1,0 +1,75 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Build & Run
+
+```bash
+./run.sh                # build + run (also available: go build ./src/ && ./src.exe)
+go build ./src/         # build only
+```
+
+The project is a single `main` package in `src/`. Dependencies are managed by `go.mod`. No tests or linters are configured.
+
+## Dependencies
+
+- **Renderer**: `github.com/Zyko0/go-sdl3` (SDL3 Go bindings — native DLLs are embedded via `binsdl`/`binimg`, no system SDL install required)
+- All textures use `SetScaleMode(sdl.SCALEMODE_NEAREST)` — pixel-art nearest-neighbour filtering.
+
+## Architecture
+
+### Game loop (fixed-timestep)
+
+`game.go:Run()` uses an accumulator pattern: physics always ticks at exactly `PhysicsHz` (60 Hz, `PhysicsDT` = 16 ms per tick) regardless of actual framerate. `fixedUpdate()` is called once per physics tick; rendering happens as often as possible. VSync is enabled. Window is resizable with `LOGICAL_PRESENTATION_OVERSCAN` (proportional scaling, no letterboxing).
+
+### Entity design
+
+- **AnimatedSprite** — wraps an `*sdl.Texture` + map of named `Animation`s. Each `Animation` holds `[]AnimationFrame` (sub-rect + duration in ms). `SetAnimation(name)` switches states; `Update(dt)` advances the clock. Used by Player, TileDef, and SavePoint.
+- **Player** — separate collision box (`PlayerColW`/`PlayerColH`, 20×26) and render size (passed at construction, defaults to `TileSize`=32). Physics (gravity, variable-height jump, double-jump) live in `Update()`. Ground detection uses `checkGround()` which explicitly scans tiles below the player's feet — this is the primary ground check, not overlap-based collision. `resolveX`/`resolveY` handle overlap ejection as a backup.
+- **TileMap** — grid of `TileDef` indices (-1 = empty). `TileDef` has an `AnimatedSprite` + `Solid` flag. Renders only visible tiles (camera-frustum culled). `GetTilesInRect()` for AABB queries.
+- **SavePoint** — two separate `AnimatedSprite`s (idle / activated). Activated on interact key (I) within `SavePointInteractR` radius. Timer expires after `SavePointActiveMS` ms. Sets player respawn point.
+- **Camera** — two modes: `"follow"` (lerps toward player centre with `FollowSpeed=0.12`) and `"fixed"` (stays at configured world position). Clamps to map bounds; centres map when viewport is larger than map. Snaps on first `SetTarget` to avoid slow startup lerp.
+
+### Key physics details (constants.go)
+
+All physics values are **per tick** (1/60 s). No time-scaling in the physics methods — the fixed-timestep guarantees consistent tick rate.
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `PlayerSpeed` | 2.0 | px/tick horizontal |
+| `Gravity` | 0.18 | px/tick² downward |
+| `JumpForce` | -6.0 | initial upward velocity |
+| `JumpCutFactor` | 0.18 | multiplier when releasing jump while ascending (tap ≈ 1/3 tile, hold ≈ 3 tiles) |
+| `MaxFallSpeed` | 7.0 | terminal velocity |
+| `MaxJumps` | 2 | double-jump enabled |
+
+### Level format (assets/levels/*.json)
+
+```json
+{
+  "width": 60, "height": 30, "tileSize": 32,
+  "playerSpawn": { "x": 100, "y": 902 },
+  "camera": { "mode": "follow" },
+  "pattern": { ".": "", "b": "bricks", "x": "save_point" },
+  "tiles": ["....bbb....", ...]
+}
+```
+
+- `pattern` maps characters to tile types. `""` = empty, `"bricks"` = solid tile, `"save_point"` = save point entity (non-solid, placed at that grid position).
+- `camera.mode`: `"follow"` or `"fixed"` (with `"x"`/`"y"` for view centre).
+- `width` × `height` must match the `tiles` array (rows = height, each row = width chars). Validation fails with a clear error on mismatch.
+
+### Controls (hardcoded in game.go:fixedUpdate)
+
+- Move: **A** / **D**
+- Jump: **J** / **W** / **Space**
+- Interact (save points): **I**
+- Quit: close window
+
+### Textures
+
+Located in `assets/textures/`. All are very small pixel-art (e.g. player is 6×11 px native). They are scaled up at render time by the `renderSize` parameter. To add multi-frame animations, replace the single-frame `Animation` lists with actual spritesheet sub-rects and durations.
+
+### Cleanup order
+
+`Game.Cleanup()` calls: `Renderer.Destroy()` → `Window.Destroy()` → `sdl.Quit()` → native library `Unload()` (reverse order). SDL must be shut down before unloading the native DLLs.
