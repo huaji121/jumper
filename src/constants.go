@@ -1,8 +1,8 @@
 package main
 
 const (
-	ScreenWidth  = 960
-	ScreenHeight = 640
+	ScreenWidth  = 1280
+	ScreenHeight = 720
 	TileSize     = 32
 
 	// Physics — all values are per physics tick (each tick = 1/60 s).

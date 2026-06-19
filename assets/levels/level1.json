@@ -1,6 +1,6 @@
 {
   "width": 60,
-  "height": 30,
+  "height": 28,
   "tileSize": 32,
   "playerSpawn": {
     "x": 100,
@@ -46,8 +46,6 @@
     "............................f.........x.....................",
     ".........s............bbb..............bbb..................",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbssssbbbbbbbbbbbbbbbbbbbf",
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "............................................................",
-    "............................................................"
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   ]
 }

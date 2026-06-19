@@ -20,7 +20,7 @@ The project is a single `main` package in `src/`. Dependencies are managed by `g
 
 ### Game loop (fixed-timestep)
 
-`game.go:Run()` uses an accumulator pattern: physics always ticks at exactly `PhysicsHz` (60 Hz, `PhysicsDT` = 16 ms per tick) regardless of actual framerate. `fixedUpdate()` is called once per physics tick; rendering happens as often as possible. VSync is enabled. Window is resizable with `LOGICAL_PRESENTATION_OVERSCAN` (proportional scaling, no letterboxing).
+`game.go:Run()` uses an accumulator pattern: physics always ticks at exactly `PhysicsHz` (60 Hz, `PhysicsDT` = 16 ms per tick) regardless of actual framerate. `fixedUpdate()` is called once per physics tick; rendering happens as often as possible. VSync is enabled. Window is fixed at 1280×720 (not resizable).
 
 ### Entity design
 
