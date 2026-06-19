@@ -28,7 +28,7 @@ type Game struct {
 	SpawnX     float64 // current respawn position
 	SpawnY     float64
 
-	eWasHeld bool // prevents repeated E-key activations per press
+	interactWasHeld bool // prevents repeated interact-key activations per press
 }
 
 // NewGame initialises SDL, loads assets, builds the level, and wires up the
@@ -247,13 +247,13 @@ func (g *Game) fixedUpdate() {
 	left := keys[sdl.SCANCODE_A]
 	right := keys[sdl.SCANCODE_D]
 	jump := keys[sdl.SCANCODE_J] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_SPACE]
-	eKey := keys[sdl.SCANCODE_E]
+	interactKey := keys[sdl.SCANCODE_O]
 
-	// --- E-key interaction (save points) ---
-	if eKey && !g.eWasHeld {
+	// --- Interact key (save points) ---
+	if interactKey && !g.interactWasHeld {
 		g.interactSavePoints()
 	}
-	g.eWasHeld = eKey
+	g.interactWasHeld = interactKey
 
 	// --- Player update ---
 	g.Player.Update(g.TileMap, left, right, jump)
