@@ -15,6 +15,7 @@
     "b": "bricks",
     "s": "spike",
     "z": { "type": "spike", "rotation": 90 },
+    "f": "flag",
     "x": "save_point"
   },
   "tiles": [
@@ -42,9 +43,9 @@
     "...............................................bbb..........",
     "............................................................",
     ".........z............bbb....................bbb............",
-    "......................................x.....................",
+    "............................f.........x.....................",
     ".........s............bbb..............bbb..................",
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbssssbbbbbbbbbbbbbbbbbbbb",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbssssbbbbbbbbbbbbbbbbbbbf",
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "............................................................",
     "............................................................"

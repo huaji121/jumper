@@ -25,10 +25,15 @@ type Game struct {
 	unloaders []unloader
 
 	SavePoints []*SavePoint
+	Flags      []*Flag
 	SpawnX     float64
 	SpawnY     float64
 
 	interactWasHeld bool
+
+	congratsSprite  *AnimatedSprite
+	showCongrats    bool
+	congratsTimer   int64
 }
 
 // NewGame initialises SDL, loads assets, builds the level, and wires up the
@@ -98,6 +103,20 @@ func NewGame() (*Game, error) {
 	}
 	spikeTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
 
+	flagTex, err := img.LoadTexture(renderer, "assets/textures/flag.png")
+	if err != nil {
+		g.Cleanup()
+		return nil, fmt.Errorf("load flag.png: %w", err)
+	}
+	flagTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
+
+	congratsTex, err := img.LoadTexture(renderer, "assets/textures/congratulations.png")
+	if err != nil {
+		g.Cleanup()
+		return nil, fmt.Errorf("load congratulations.png: %w", err)
+	}
+	congratsTex.SetScaleMode(sdl.SCALEMODE_NEAREST)
+
 	// --- Build AnimatedSprites ---
 
 	brickSprite := NewAnimatedSprite(brickTex)
@@ -130,6 +149,16 @@ func NewGame() (*Game, error) {
 	playerSprite.AddAnimation(&Animation{Name: "run", Frames: []AnimationFrame{fullFrame()}, Loop: true})
 	playerSprite.AddAnimation(&Animation{Name: "jump", Frames: []AnimationFrame{fullFrame()}, Loop: false})
 	playerSprite.AddAnimation(&Animation{Name: "fall", Frames: []AnimationFrame{fullFrame()}, Loop: false})
+
+	flagSprite := NewAnimatedSprite(flagTex)
+	flagSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+		{X: 0, Y: 0, W: flagSprite.TexW, H: flagSprite.TexH, Duration: 0},
+	}, Loop: true})
+
+	congratsSprite := NewAnimatedSprite(congratsTex)
+	congratsSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+		{X: 0, Y: 0, W: congratsSprite.TexW, H: congratsSprite.TexH, Duration: 0},
+	}, Loop: true})
 
 	makeSavePointSprites := func() (*AnimatedSprite, *AnimatedSprite) {
 		idle := NewAnimatedSprite(spTex)
@@ -173,7 +202,7 @@ func NewGame() (*Game, error) {
 			pat, ok := ld.Pattern[string(ch)]
 			if !ok || pat.Type == "" {
 				continue
-			}
+		}
 			switch pat.Type {
 			case "bricks":
 				def := &TileDef{Sprite: brickSprite, Solid: true}
@@ -181,13 +210,16 @@ func NewGame() (*Game, error) {
 			case "spike":
 				def := &TileDef{Sprite: spikeSprite, Spike: true, Rotation: pat.Rotation}
 				tileMap.SetTile(col, row, getOrCreateDef("spike", def))
+			case "flag":
+				f := NewFlag(flagSprite, float64(col)*float64(ld.TileSize), float64(row)*float64(ld.TileSize), ld.TileSize)
+				g.Flags = append(g.Flags, f)
 			case "save_point":
 				idle, act := makeSavePointSprites()
 				x := float64(col) * float64(ld.TileSize)
 				y := float64(row) * float64(ld.TileSize)
 				sp := NewSavePoint(idle, act, x, y, ld.TileSize)
 				savePoints = append(savePoints, sp)
-			}
+		}
 		}
 	}
 
@@ -213,6 +245,7 @@ func NewGame() (*Game, error) {
 	g.Player = player
 	g.Camera = cam
 	g.SavePoints = savePoints
+	g.congratsSprite = congratsSprite
 	g.SpawnX = ld.PlayerSpawn.X
 	g.SpawnY = ld.PlayerSpawn.Y
 
@@ -228,7 +261,7 @@ func (g *Game) Run() error {
 		for sdl.PollEvent(&event) {
 			if event.Type == sdl.EVENT_QUIT {
 				g.Running = false
-			}
+		}
 		}
 		if !g.Running {
 			break
@@ -268,8 +301,17 @@ func (g *Game) fixedUpdate() {
 
 	if interactKey && !g.interactWasHeld {
 		g.interactSavePoints()
+		g.interactFlags()
 	}
 	g.interactWasHeld = interactKey
+
+	// Congratulations timer.
+	if g.showCongrats {
+		g.congratsTimer -= PhysicsDT
+		if g.congratsTimer <= 0 {
+			g.showCongrats = false
+		}
+	}
 
 	g.Player.Update(g.TileMap, left, right, jump)
 
@@ -294,6 +336,20 @@ func (g *Game) fixedUpdate() {
 	g.Camera.Update(g.TileMap.PixelWidth(), g.TileMap.PixelHeight())
 }
 
+func (g *Game) interactFlags() {
+	px := g.Player.CenterX()
+	py := g.Player.CenterY()
+	for _, f := range g.Flags {
+		dx := px - f.CenterX()
+		dy := py - f.CenterY()
+		if math.Sqrt(dx*dx+dy*dy) <= float64(SavePointInteractR) {
+			g.showCongrats = true
+			g.congratsTimer = 3000
+			return
+		}
+	}
+}
+
 func (g *Game) interactSavePoints() {
 	px := g.Player.CenterX()
 	py := g.Player.CenterY()
@@ -306,7 +362,7 @@ func (g *Game) interactSavePoints() {
 			if sp.Activate() {
 				g.SpawnX = sp.CenterX() - float64(PlayerColW)/2
 				g.SpawnY = sp.Y + float64(sp.H) - float64(PlayerColH)
-			}
+		}
 			return
 		}
 	}
@@ -320,9 +376,20 @@ func (g *Game) render() {
 
 	for _, sp := range g.SavePoints {
 		sp.Render(g.Renderer, g.Camera)
+		}
+		for _, f := range g.Flags {
+			f.Render(g.Renderer, g.Camera)
 	}
 
 	g.Player.Render(g.Renderer, g.Camera)
+
+		if g.showCongrats {
+			cw := float32(g.congratsSprite.TexW)
+			ch := float32(g.congratsSprite.TexH)
+			cx := float32(g.Camera.W)/2 - cw/2
+			cy := float32(g.Camera.H)/2 - ch/2
+			g.congratsSprite.Render(g.Renderer, cx, cy, cw, ch, sdl.FLIP_NONE, 0)
+		}
 
 	g.Renderer.Present()
 }
