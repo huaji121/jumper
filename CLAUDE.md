@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run
 
 ```bash
-./run.sh                # build + run (also available: go build ./src/ && ./src.exe)
-go build ./src/         # build only
+./run.sh                # build + run (also available: go build ./src/ && ./jumper.exe)
+go build -o jumper.exe ./src/  # build only
 ```
 
 The project is a single `main` package in `src/`. Dependencies are managed by `go.mod`. No tests or linters are configured.

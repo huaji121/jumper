@@ -1,8 +1,8 @@
 # Build output
-*.exe
+jumper.exe
+/jumper
 *.exe~
-jumper
-src/jumper
+
 
 # IDE
 .idea/
