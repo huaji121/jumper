@@ -17,14 +17,15 @@ type SavePoint struct {
 }
 
 // NewSavePoint creates a save point from separate idle and activated sprites.
-func NewSavePoint(idle, activated *AnimatedSprite, x, y float64) *SavePoint {
+// renderSize should match the map tileSize so the sprite scales with tiles.
+func NewSavePoint(idle, activated *AnimatedSprite, x, y float64, renderSize int32) *SavePoint {
 	return &SavePoint{
 		idleSpr:      idle,
 		activatedSpr: activated,
 		X:            x,
 		Y:            y,
-		W:            TileSize,
-		H:            TileSize,
+		W:            renderSize,
+		H:            renderSize,
 	}
 }
 

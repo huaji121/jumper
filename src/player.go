@@ -9,8 +9,10 @@ type Player struct {
 	Sprite      *AnimatedSprite
 	X, Y        float64 // world position (top-left of bounding box)
 	VelX, VelY  float64
-	Width       int32 // bounding-box width
-	Height      int32 // bounding-box height
+	Width       int32 // collision-box width
+	Height      int32 // collision-box height
+	RenderW     int32 // on-screen sprite width
+	RenderH     int32 // on-screen sprite height
 	OnGround    bool
 	JumpsLeft   int
 	FacingRight bool
@@ -18,15 +20,16 @@ type Player struct {
 }
 
 // NewPlayer creates a player from an AnimatedSprite at the given world
-// position.  Collision box uses PlayerColW×PlayerColH; rendering is scaled
-// to TileSize×TileSize.
-func NewPlayer(sprite *AnimatedSprite, x, y float64) *Player {
+// position.  renderSize is the on-screen sprite size (match the map tileSize).
+func NewPlayer(sprite *AnimatedSprite, x, y float64, renderSize int32) *Player {
 	return &Player{
 		Sprite:      sprite,
 		X:           x,
 		Y:           y,
 		Width:       PlayerColW,
 		Height:      PlayerColH,
+		RenderW:     renderSize,
+		RenderH:     renderSize,
 		JumpsLeft:   MaxJumps,
 		FacingRight: true,
 	}
@@ -182,21 +185,19 @@ func (p *Player) resolveY(tileMap *TileMap) {
 }
 
 // Render draws the player relative to the camera.
-// The sprite (TileSize×TileSize) is centered on the smaller collision box
-// (PlayerColW×PlayerColH), with the sprite's bottom edge aligned to the
-// collision box bottom (feet on ground).
+// The sprite is centered on the smaller collision box and bottom-aligned.
 func (p *Player) Render(renderer *sdl.Renderer, cam *Camera) {
-	// Offset the sprite so it is horizontally centered on the collision box
-	// and bottom-aligned (feet touch the ground at Y+PlayerColH).
-	rx := float64(cam.ScreenX(p.X)) + (float64(PlayerColW)-TileSize)/2
-	ry := float64(cam.ScreenY(p.Y)) + float64(PlayerColH) - TileSize
+	rw := float64(p.RenderW)
+	rh := float64(p.RenderH)
+	rx := float64(cam.ScreenX(p.X)) + (float64(PlayerColW)-rw)/2
+	ry := float64(cam.ScreenY(p.Y)) + float64(PlayerColH) - rh
 
 	flip := sdl.FLIP_NONE
 	if !p.FacingRight {
 		flip = sdl.FLIP_HORIZONTAL
 	}
 
-	p.Sprite.Render(renderer, float32(rx), float32(ry), TileSize, TileSize, flip)
+	p.Sprite.Render(renderer, float32(rx), float32(ry), float32(rw), float32(rh), flip)
 }
 
 // CenterX returns the world X of the player's center.

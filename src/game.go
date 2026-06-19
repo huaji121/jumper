@@ -137,62 +137,45 @@ func NewGame() (*Game, error) {
 		return idle, act
 	}
 
-	// --- Build tilemap (30×20 tiles at 32 px each → 960×640 world) ---
-	tileMap := NewTileMap(30, 20, TileSize, TileSize)
+	// --- Load level from JSON ---
+	ld, err := LoadLevel("assets/levels/level1.json")
+	if err != nil {
+		g.Cleanup()
+		return nil, err
+	}
+
+	tileMap := NewTileMap(ld.Width, ld.Height, ld.TileSize, ld.TileSize)
 	brickDefIdx := tileMap.AddDef(&TileDef{Sprite: brickSprite, Solid: true})
 
-	// ASCII level layout — X = solid brick, . = empty
-	level := []string{
-		"..............................",
-		"..............................",
-		"..............................",
-		"..............................",
-		"......XXX.....XXX.............",
-		"..............................",
-		"....XX.......XX..............",
-		"..............................",
-		"...X...........X....XXX.......",
-		"..............................",
-		"..XXX.........XXX.............",
-		"..............................",
-		"...........X..................",
-		"..........XXX..............X..",
-		".........XXXXX.............X..",
-		"......X....................X..",
-		"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-		"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-		"..............................",
-		"..............................",
-	}
-	for row, line := range level {
+	var savePoints []*SavePoint
+
+	for row, line := range ld.Tiles {
 		for col, ch := range line {
-			if ch == 'X' {
+			kind := ld.Pattern[string(ch)]
+			switch kind {
+			case "bricks":
 				tileMap.SetTile(col, row, brickDefIdx)
+			case "save_point":
+				idle, act := makeSavePointSprites()
+				x := float64(col) * float64(ld.TileSize)
+				y := float64(row) * float64(ld.TileSize)
+				sp := NewSavePoint(idle, act, x, y, ld.TileSize)
+				savePoints = append(savePoints, sp)
 			}
 		}
 	}
 
 	// --- Player ---
-	startX := 100.0
-	startY := float64(14*int(TileSize) - PlayerColH)
-	player := NewPlayer(playerSprite, startX, startY)
-
-	// --- Save points ---
-	spIdle1, spAct1 := makeSavePointSprites()
-	spIdle2, spAct2 := makeSavePointSprites()
-	spIdle3, spAct3 := makeSavePointSprites()
-	sp1 := NewSavePoint(spIdle1, spAct1, 10*TileSize, 15*TileSize) // ground, left area
-	sp2 := NewSavePoint(spIdle2, spAct2, 20*TileSize, 7*TileSize)  // mid-level platform
-	sp3 := NewSavePoint(spIdle3, spAct3, 5*TileSize, 10*TileSize)  // upper platform
+	player := NewPlayer(playerSprite, ld.PlayerSpawn.X, ld.PlayerSpawn.Y, TileSize)
 
 	cam := NewCamera(ScreenWidth, ScreenHeight)
 
 	g.TileMap = tileMap
 	g.Player = player
 	g.Camera = cam
-	g.SavePoints = []*SavePoint{sp1, sp2, sp3}
-	g.SpawnX = startX
-	g.SpawnY = startY
+	g.SavePoints = savePoints
+	g.SpawnX = ld.PlayerSpawn.X
+	g.SpawnY = ld.PlayerSpawn.Y
 
 	return g, nil
 }
@@ -289,7 +272,7 @@ func (g *Game) interactSavePoints() {
 		if dist <= float64(SavePointInteractR) {
 			if sp.Activate() {
 				g.SpawnX = sp.CenterX() - float64(PlayerColW)/2
-				g.SpawnY = sp.Y
+				g.SpawnY = sp.Y + float64(sp.H) - float64(PlayerColH)
 			}
 			return // only activate the first one in range
 		}
