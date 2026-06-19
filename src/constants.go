@@ -19,8 +19,8 @@ const (
 
 	// Player collision box — smaller than the rendered sprite so the player
 	// can slip through tighter gaps and doesn't feel like a block.
-	PlayerColW = 20
-	PlayerColH = 26
+	PlayerColW = 14
+	PlayerColH = 22
 
 	// Save point
 	SavePointActiveMS  = 500 // ms the "activated" visual lasts
