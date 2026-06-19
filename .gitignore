@@ -2,6 +2,7 @@
 jumper.exe
 /jumper
 *.exe~
+src.exe
 
 
 # IDE

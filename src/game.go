@@ -24,10 +24,12 @@ type Game struct {
 
 	SavePoints []*SavePoint
 	Flags      []*Flag
+	Particles  *ParticleSystem
 	SpawnX     float64
 	SpawnY     float64
 
 	interactWasHeld bool
+	respawnWasHeld  bool
 
 	congratsSprite *AnimatedSprite
 	congratsTex    *sdl.Texture
@@ -160,6 +162,18 @@ func (g *Game) loadTextures() error {
 		{X: 0, Y: 0, W: g.congratsSprite.TexW, H: g.congratsSprite.TexH, Duration: 0},
 	}, Loop: true})
 
+	// Blood particles.
+	t, err = img.LoadTexture(g.Renderer, "assets/textures/blood.png")
+	if err != nil {
+		return fmt.Errorf("load blood.png: %w", err)
+	}
+	t.SetScaleMode(sdl.SCALEMODE_NEAREST)
+	bloodSprite := NewAnimatedSprite(t)
+	bloodSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+		{X: 0, Y: 0, W: bloodSprite.TexW, H: bloodSprite.TexH, Duration: 0},
+	}, Loop: true})
+	g.Particles = NewParticleSystem(bloodSprite)
+
 	return nil
 }
 
@@ -291,10 +305,8 @@ func (g *Game) Run() error {
 func (g *Game) fixedUpdate() {
 	keys := sdl.GetKeyboardState()
 
-	left := keys[sdl.SCANCODE_A]
-	right := keys[sdl.SCANCODE_D]
-	jump := keys[sdl.SCANCODE_J] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_SPACE]
 	interactKey := keys[sdl.SCANCODE_I]
+	respawnKey := keys[sdl.SCANCODE_R]
 
 	if interactKey && !g.interactWasHeld {
 		g.interactSavePoints()
@@ -302,7 +314,16 @@ func (g *Game) fixedUpdate() {
 	}
 	g.interactWasHeld = interactKey
 
-	// Congratulations timer — advance to next level when it expires.
+	// R-key respawn — available at any time.
+	if respawnKey && !g.respawnWasHeld {
+		if !g.Player.Dead {
+			g.Particles.Burst(g.Player.CenterX(), g.Player.CenterY(), 25, 1.0, 4.0, 500, 1200)
+		}
+		g.Player.Respawn(g.SpawnX, g.SpawnY)
+	}
+	g.respawnWasHeld = respawnKey
+
+	// Congratulations timer.
 	if g.showCongrats {
 		g.congratsTimer -= PhysicsDT
 		if g.congratsTimer <= 0 {
@@ -320,11 +341,20 @@ func (g *Game) fixedUpdate() {
 		}
 	}
 
+	// Player update (skipped when dead).
+	left := keys[sdl.SCANCODE_A]
+	right := keys[sdl.SCANCODE_D]
+	jump := keys[sdl.SCANCODE_J] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_SPACE]
 	g.Player.Update(g.TileMap, left, right, jump)
 
-	if g.Player.CheckSpikeHit(g.TileMap) {
-		fmt.Printf("[respawn] level %d: (%.0f, %.0f)\n", g.currentLevel+1, g.SpawnX, g.SpawnY)
-	g.Player.Respawn(g.SpawnX, g.SpawnY)
+	// Spike / fall — trigger death + particles.
+	if !g.Player.Dead {
+		hitSpike := g.Player.CheckSpikeHit(g.TileMap)
+		fellOff := g.Player.Y > float64(g.TileMap.PixelHeight())+TileSize
+		if hitSpike || fellOff {
+			g.Player.Dead = true
+			g.Particles.Burst(g.Player.CenterX(), g.Player.CenterY(), 25, 1.0, 4.0, 500, 1200)
+		}
 	}
 
 	for _, sp := range g.SavePoints {
@@ -332,11 +362,7 @@ func (g *Game) fixedUpdate() {
 	}
 
 	g.TileMap.Update(PhysicsDT)
-
-	if g.Player.Y > float64(g.TileMap.PixelHeight())+TileSize {
-		fmt.Printf("[respawn] level %d: (%.0f, %.0f)\n", g.currentLevel+1, g.SpawnX, g.SpawnY)
-	g.Player.Respawn(g.SpawnX, g.SpawnY)
-	}
+	g.Particles.Update(PhysicsDT)
 
 	if g.Camera.Mode != "fixed" {
 		g.Camera.SetTarget(g.Player.CenterX(), g.Player.CenterY())
@@ -348,7 +374,9 @@ func (g *Game) interactFlags() {
 	px := g.Player.CenterX()
 	py := g.Player.CenterY()
 	for _, f := range g.Flags {
-		if math.Sqrt((px-f.CenterX())*(px-f.CenterX())+(py-f.CenterY())*(py-f.CenterY())) <= float64(SavePointInteractR) {
+		dx := px - f.CenterX()
+		dy := py - f.CenterY()
+		if math.Sqrt(dx*dx+dy*dy) <= float64(SavePointInteractR) {
 			g.showCongrats = true
 			g.congratsTimer = 3000
 			g.pendingLevel = true
@@ -361,7 +389,9 @@ func (g *Game) interactSavePoints() {
 	px := g.Player.CenterX()
 	py := g.Player.CenterY()
 	for _, sp := range g.SavePoints {
-		if math.Sqrt((px-sp.CenterX())*(px-sp.CenterX())+(py-sp.CenterY())*(py-sp.CenterY())) <= float64(SavePointInteractR) {
+		dx := px - sp.CenterX()
+		dy := py - sp.CenterY()
+		if math.Sqrt(dx*dx+dy*dy) <= float64(SavePointInteractR) {
 			if sp.Activate() {
 				g.SpawnX = sp.CenterX() - float64(PlayerColW)/2
 				g.SpawnY = sp.Y + float64(sp.H) - float64(PlayerColH)
@@ -385,6 +415,7 @@ func (g *Game) render() {
 	}
 
 	g.Player.Render(g.Renderer, g.Camera)
+	g.Particles.Render(g.Renderer, g.Camera)
 
 	if g.showCongrats {
 		cw := float32(g.congratsSprite.TexW)

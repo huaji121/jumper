@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run
 
 ```bash
-./run.sh                # build + run (also available: go build ./src/ && ./jumper.exe)
-go build -o jumper.exe ./src/  # build only
+./run.sh                         # build + run
+go build -o jumper.exe ./src/    # build only (always use -o jumper.exe — go build ./src/ alone creates src.exe)
 ```
 
 The project is a single `main` package in `src/`. Dependencies are managed by `go.mod`. No tests or linters are configured.
@@ -24,8 +24,9 @@ The project is a single `main` package in `src/`. Dependencies are managed by `g
 
 ### Entity design
 
-- **AnimatedSprite** — wraps an `*sdl.Texture` + map of named `Animation`s. Each `Animation` holds `[]AnimationFrame` (sub-rect + duration in ms). `SetAnimation(name)` switches states; `Update(dt)` advances the clock. Used by Player, TileDef, and SavePoint.
-- **Player** — separate collision box (`PlayerColW`/`PlayerColH`, 20×26) and render size (passed at construction, defaults to `TileSize`=32). Physics (gravity, variable-height jump, double-jump) live in `Update()`. Ground detection uses `checkGround()` which explicitly scans tiles below the player's feet — this is the primary ground check, not overlap-based collision. `resolveX`/`resolveY` handle overlap ejection as a backup.
+- **AnimatedSprite** — wraps an `*sdl.Texture` + map of named `Animation`s. Each `Animation` holds `[]AnimationFrame` (sub-rect + duration in ms). `SetAnimation(name)` switches states; `Update(dt)` advances the clock. Used by Player, TileDef, SavePoint, Flag, and ParticleSystem.
+- **ParticleSystem** — manages a pool of `Particle`s with velocity/lifetime. `Burst(x, y, n, …)` spawns n particles at a world position with random directions and speeds. Particles fade out (alpha based on remaining lifetime) and are removed when expired. Used for blood splatter on death.
+- **Player** — separate collision box (`PlayerColW`/`PlayerColH`, 20×26) and render size (passed at construction, defaults to `TileSize`=32). Physics (gravity, variable-height jump, double-jump) live in `Update()`. Ground detection uses `checkGround()` which explicitly scans tiles below the player's feet — this is the primary ground check, not overlap-based collision. `resolveX`/`resolveY` handle overlap ejection as a backup. On death (spike or fall) the `Dead` flag is set and blood particles burst — press **R** to respawn.
 - **TileMap** — grid of `TileDef` indices (-1 = empty). `TileDef` has an `AnimatedSprite` + `Solid` flag. Renders only visible tiles (camera-frustum culled). `GetTilesInRect()` for AABB queries.
 - **SavePoint** — two separate `AnimatedSprite`s (idle / activated). Activated on interact key (I) within `SavePointInteractR` radius. Timer expires after `SavePointActiveMS` ms. Sets player respawn point.
 - **Camera** — two modes: `"follow"` (lerps toward player centre with `FollowSpeed=0.12`) and `"fixed"` (stays at configured world position). Clamps to map bounds; centres map when viewport is larger than map. Snaps on first `SetTarget` to avoid slow startup lerp.
@@ -63,7 +64,8 @@ All physics values are **per tick** (1/60 s). No time-scaling in the physics met
 
 - Move: **A** / **D**
 - Jump: **J** / **W** / **Space**
-- Interact (save points): **I**
+- Interact (save points / flags): **I**
+- Respawn (after death): **R**
 - Quit: close window
 
 ### Textures
