@@ -168,6 +168,9 @@ func NewGame() (*Game, error) {
 	player := NewPlayer(playerSprite, ld.PlayerSpawn.X, ld.PlayerSpawn.Y, TileSize)
 
 	cam := NewCamera(ScreenWidth, ScreenHeight)
+	if ld.Camera.Mode == "fixed" {
+		cam.SetFixed(ld.Camera.X, ld.Camera.Y)
+	}
 
 	g.TileMap = tileMap
 	g.Player = player
@@ -260,7 +263,9 @@ func (g *Game) fixedUpdate() {
 	}
 
 	// --- Camera ---
-	g.Camera.SetTarget(g.Player.CenterX(), g.Player.CenterY())
+	if g.Camera.Mode != "fixed" {
+		g.Camera.SetTarget(g.Player.CenterX(), g.Player.CenterY())
+	}
 	g.Camera.Update(g.TileMap.PixelWidth(), g.TileMap.PixelHeight())
 }
 

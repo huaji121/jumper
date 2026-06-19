@@ -12,14 +12,20 @@ type Vec2 struct {
 	Y float64 `json:"y"`
 }
 
+// CameraConfig describes camera behaviour for a level.
+type CameraConfig struct {
+	Mode string `json:"mode"` // "follow" or "fixed"
+	X    float64 `json:"x,omitempty"`
+	Y    float64 `json:"y,omitempty"`
+}
+
 // LevelData is the JSON format for a level file.
-// Pattern maps single characters to tile types: "b"→"bricks", "x"→"save_point".
-// Save points are defined by placing their pattern character in the tile grid.
 type LevelData struct {
 	Width       int               `json:"width"`
 	Height      int               `json:"height"`
 	TileSize    int32             `json:"tileSize"`
 	PlayerSpawn Vec2              `json:"playerSpawn"`
+	Camera      CameraConfig      `json:"camera"`
 	Pattern     map[string]string `json:"pattern"`
 	Tiles       []string          `json:"tiles"`
 }
