@@ -204,12 +204,16 @@ func (p *Player) CheckSpikeHit(tileMap *TileMap) bool {
 		var tri [][2]float64
 		switch rot {
 		case 90:
-			tri = [][2]float64{{tx + tw - spikeTip, ty + th/2}, {tx, ty}, {tx, ty + th}}
+			// Apex at right edge centre, base along left edge.
+			tri = [][2]float64{{tx + tw, ty + th/2}, {tx, ty}, {tx, ty + th}}
 		case 180:
+			// Apex near bottom centre, base along top edge.
 			tri = [][2]float64{{tx + tw/2, ty + th - spikeTip}, {tx, ty}, {tx + tw, ty}}
 		case 270:
-			tri = [][2]float64{{tx + spikeTip, ty + th/2}, {tx + tw, ty}, {tx + tw, ty + th}}
+			// Apex at left edge centre, base along right edge.
+			tri = [][2]float64{{tx, ty + th/2}, {tx + tw, ty}, {tx + tw, ty + th}}
 		default:
+			// 0° — apex 16 px from top centre, base along bottom edge.
 			tri = [][2]float64{{tx + tw/2, ty + spikeTip}, {tx, ty + th}, {tx + tw, ty + th}}
 		}
 		if convexPolygonsOverlap(rect, tri) {
