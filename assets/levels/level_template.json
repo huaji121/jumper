@@ -1,0 +1,19 @@
+{
+  "width": 0,
+  "height": 0,
+  "tileSize": 32,
+  "playerSpawn": {
+    "x": 0,
+    "y": 0
+  },
+  "camera": {
+    "mode": "follow"
+  },
+  "zoom": 1.0,
+  "pattern": {
+    ".": {
+      "type": ""
+    }
+  },
+  "tiles": []
+}
