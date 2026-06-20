@@ -1,104 +1,79 @@
 package main
 
-import (
-	"github.com/Zyko0/go-sdl3/sdl"
-)
+import "github.com/Zyko0/go-sdl3/sdl"
 
-// TileDef defines a tile type: its animated sprite, collision behaviour,
-// and optional rotation (degrees — used for spike orientation and rendering).
-type TileDef struct {
-	Sprite   *AnimatedSprite
-	Solid    bool
-	Spike    bool
-	Rotation float64
-}
-
-// TileMap is a grid-based map supporting animated tiles.
-// Cells hold indices into Defs: -1 is empty, 0+ is a Defs index.
+// TileMap is a grid-based map.  Each cell holds a Tile (nil = empty).
+// Tiles can implement Collider for physics and Interactable for I-key actions.
 type TileMap struct {
-	Defs                  []*TileDef
-	Grid                  [][]int
+	Grid                  [][]Tile
 	Width, Height         int
 	TileWidth, TileHeight int32
 }
 
-// NewTileMap creates an empty tilemap with every cell set to -1 (empty).
-func NewTileMap(width, height int, tileWidth, tileHeight int32) *TileMap {
-	grid := make([][]int, height)
+func NewTileMap(width, height int, tw, th int32) *TileMap {
+	grid := make([][]Tile, height)
 	for y := range grid {
-		grid[y] = make([]int, width)
-		for x := range grid[y] {
-			grid[y][x] = -1
-		}
+		grid[y] = make([]Tile, width)
 	}
 	return &TileMap{
 		Grid:       grid,
 		Width:      width,
 		Height:     height,
-		TileWidth:  tileWidth,
-		TileHeight: tileHeight,
+		TileWidth:  tw,
+		TileHeight: th,
 	}
 }
 
-// AddDef registers a tile definition and returns its index.
-func (tm *TileMap) AddDef(def *TileDef) int {
-	tm.Defs = append(tm.Defs, def)
-	return len(tm.Defs) - 1
-}
-
-// SetTile assigns a tile definition index to a grid cell (-1 for empty).
-func (tm *TileMap) SetTile(x, y, defIndex int) {
+func (tm *TileMap) SetTile(x, y int, t Tile) {
 	if x < 0 || x >= tm.Width || y < 0 || y >= tm.Height {
 		return
 	}
-	tm.Grid[y][x] = defIndex
+	tm.Grid[y][x] = t
 }
 
-// GetTile returns the tile definition index at a cell, or -1 if empty/OOB.
-func (tm *TileMap) GetTile(x, y int) int {
+func (tm *TileMap) GetTile(x, y int) Tile {
 	if x < 0 || x >= tm.Width || y < 0 || y >= tm.Height {
-		return -1
+		return nil
 	}
 	return tm.Grid[y][x]
 }
 
-// IsSolid reports whether the tile at (x, y) exists and is solid.
 func (tm *TileMap) IsSolid(x, y int) bool {
-	idx := tm.GetTile(x, y)
-	if idx < 0 || idx >= len(tm.Defs) {
-		return false
+	t := tm.GetTile(x, y)
+	if c, ok := t.(Collider); ok {
+		return c.Collision() == CollisionSolid
 	}
-	return tm.Defs[idx].Solid
+	return false
 }
 
-// IsSpike reports whether the tile at (x, y) exists and is a spike.
 func (tm *TileMap) IsSpike(x, y int) bool {
-	idx := tm.GetTile(x, y)
-	if idx < 0 || idx >= len(tm.Defs) {
-		return false
+	t := tm.GetTile(x, y)
+	if c, ok := t.(Collider); ok {
+		return c.Collision() == CollisionSpike
 	}
-	return tm.Defs[idx].Spike
+	return false
 }
 
-// SpikeRotation returns the rotation angle for a spike tile, or 0.
 func (tm *TileMap) SpikeRotation(x, y int) float64 {
-	idx := tm.GetTile(x, y)
-	if idx < 0 || idx >= len(tm.Defs) {
-		return 0
+	t := tm.GetTile(x, y)
+	if c, ok := t.(Collider); ok && c.Collision() == CollisionSpike {
+		return c.Rotation()
 	}
-	return tm.Defs[idx].Rotation
+	return 0
 }
 
-// Update advances all tile sprite animations by dt ms.
+// Update advances every tile's animation by dt ms.
 func (tm *TileMap) Update(dt int64) {
-	for _, def := range tm.Defs {
-		if def.Sprite != nil {
-			def.Sprite.Update(dt)
+	for _, row := range tm.Grid {
+		for _, t := range row {
+			if t != nil {
+				t.Update(dt)
+			}
 		}
 	}
 }
 
-// Render draws the visible portion of the tilemap through the camera.
+// Render draws visible tiles through the camera (frustum culled).
 func (tm *TileMap) Render(renderer *sdl.Renderer, cam *Camera) {
 	startCol := int(cam.X) / int(tm.TileWidth)
 	if startCol < 0 {
@@ -119,76 +94,42 @@ func (tm *TileMap) Render(renderer *sdl.Renderer, cam *Camera) {
 
 	for row := startRow; row < endRow; row++ {
 		for col := startCol; col < endCol; col++ {
-			idx := tm.Grid[row][col]
-			if idx < 0 || idx >= len(tm.Defs) {
-				continue
-			}
-			def := tm.Defs[idx]
-			if def.Sprite == nil {
+			t := tm.Grid[row][col]
+			if t == nil {
 				continue
 			}
 			sx := float32(float64(col)*float64(tm.TileWidth) - cam.X)
 			sy := float32(float64(row)*float64(tm.TileHeight) - cam.Y)
-
-			flip := sdl.FLIP_NONE
-			angle := 0.0
-			if def.Rotation == 180 {
-				flip = sdl.FLIP_VERTICAL
-			} else if def.Rotation != 0 {
-				angle = def.Rotation
-			}
-
-			def.Sprite.Render(renderer, sx, sy,
-				float32(tm.TileWidth), float32(tm.TileHeight), flip, angle)
+			t.Render(renderer, cam, sx, sy, tm.TileWidth, tm.TileHeight)
 		}
 	}
 }
 
-// PixelToTile converts world pixel coordinates to tile grid coordinates.
 func (tm *TileMap) PixelToTile(px, py float64) (int, int) {
-	return int(px) / int(tm.TileWidth), int(py) / int(tm.TileHeight)
+	return int(px)/int(tm.TileWidth), int(py)/int(tm.TileHeight)
 }
 
-// TileToPixel converts tile grid coordinates to world pixel coordinates
-// (top-left corner of the tile).
 func (tm *TileMap) TileToPixel(tx, ty int) (float64, float64) {
-	return float64(tx) * float64(tm.TileWidth), float64(ty) * float64(tm.TileHeight)
+	return float64(tx)*float64(tm.TileWidth), float64(ty)*float64(tm.TileHeight)
 }
 
-// GetTilesInRect returns tile grid coordinates that overlap the given AABB.
 func (tm *TileMap) GetTilesInRect(rx, ry, rw, rh float64) [][2]int {
-	startCol := int(rx) / int(tm.TileWidth)
-	if startCol < 0 {
-		startCol = 0
-	}
-	endCol := int(rx+rw-1) / int(tm.TileWidth)
-	if endCol >= tm.Width {
-		endCol = tm.Width - 1
-	}
-	startRow := int(ry) / int(tm.TileHeight)
-	if startRow < 0 {
-		startRow = 0
-	}
-	endRow := int(ry+rh-1) / int(tm.TileHeight)
-	if endRow >= tm.Height {
-		endRow = tm.Height - 1
-	}
-
-	var result [][2]int
-	for row := startRow; row <= endRow; row++ {
-		for col := startCol; col <= endCol; col++ {
-			result = append(result, [2]int{col, row})
+	sc := int(rx) / int(tm.TileWidth)
+	if sc < 0 { sc = 0 }
+	ec := int(rx+rw-1) / int(tm.TileWidth)
+	if ec >= tm.Width { ec = tm.Width - 1 }
+	sr := int(ry) / int(tm.TileHeight)
+	if sr < 0 { sr = 0 }
+	er := int(ry+rh-1) / int(tm.TileHeight)
+	if er >= tm.Height { er = tm.Height - 1 }
+	var out [][2]int
+	for row := sr; row <= er; row++ {
+		for col := sc; col <= ec; col++ {
+			out = append(out, [2]int{col, row})
 		}
 	}
-	return result
+	return out
 }
 
-// PixelWidth returns the total map width in pixels.
-func (tm *TileMap) PixelWidth() int {
-	return tm.Width * int(tm.TileWidth)
-}
-
-// PixelHeight returns the total map height in pixels.
-func (tm *TileMap) PixelHeight() int {
-	return tm.Height * int(tm.TileHeight)
-}
+func (tm *TileMap) PixelWidth() int  { return tm.Width * int(tm.TileWidth) }
+func (tm *TileMap) PixelHeight() int { return tm.Height * int(tm.TileHeight) }

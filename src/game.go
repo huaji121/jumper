@@ -22,11 +22,9 @@ type Game struct {
 	lastTick  uint64
 	unloaders []unloader
 
-	SavePoints []*SavePoint
-	Flags      []*Flag
-	Particles  *ParticleSystem
-	SpawnX     float64
-	SpawnY     float64
+	Particles *ParticleSystem
+	SpawnX    float64
+	SpawnY    float64
 
 	interactWasHeld bool
 	respawnWasHeld  bool
@@ -36,9 +34,10 @@ type Game struct {
 	showCongrats   bool
 	congratsTimer  int64
 
+	playerSprite *AnimatedSprite
+
 	brickSprite  *AnimatedSprite
 	spikeSprite  *AnimatedSprite
-	playerSprite *AnimatedSprite
 	flagSprite   *AnimatedSprite
 	spTex        *sdl.Texture
 	spActTex     *sdl.Texture
@@ -185,19 +184,7 @@ func (g *Game) switchToLevel(idx int) error {
 	}
 
 	tileMap := NewTileMap(ld.Width, ld.Height, ld.TileSize, ld.TileSize)
-	tileDefCache := map[string]int{}
-	getOrCreateDef := func(tag string, def *TileDef) int {
-		key := fmt.Sprintf("%s:%v", tag, def.Rotation)
-		if i, ok := tileDefCache[key]; ok {
-			return i
-		}
-		i := tileMap.AddDef(def)
-		tileDefCache[key] = i
-		return i
-	}
-
-	var savePoints []*SavePoint
-	var flags []*Flag
+	ts := ld.TileSize
 
 	for row, line := range ld.Tiles {
 		for col, ch := range line {
@@ -207,12 +194,11 @@ func (g *Game) switchToLevel(idx int) error {
 			}
 			switch pat.Type {
 			case "bricks":
-				tileMap.SetTile(col, row, getOrCreateDef("brick", &TileDef{Sprite: g.brickSprite, Solid: true}))
+				tileMap.SetTile(col, row, &BrickTile{sprite: g.brickSprite})
 			case "spike":
-				tileMap.SetTile(col, row, getOrCreateDef("spike", &TileDef{Sprite: g.spikeSprite, Spike: true, Rotation: pat.Rotation}))
+				tileMap.SetTile(col, row, &SpikeTile{sprite: g.spikeSprite, rotation: pat.Rotation})
 			case "flag":
-				f := NewFlag(g.flagSprite, float64(col)*float64(ld.TileSize), float64(row)*float64(ld.TileSize), ld.TileSize)
-				flags = append(flags, f)
+				tileMap.SetTile(col, row, &FlagTile{sprite: g.flagSprite})
 			case "save_point":
 				idle := NewAnimatedSprite(g.spTex)
 				idle.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
@@ -222,15 +208,14 @@ func (g *Game) switchToLevel(idx int) error {
 				act.AddAnimation(&Animation{Name: "activated", Frames: []AnimationFrame{
 					{X: 0, Y: 0, W: act.TexW, H: act.TexH, Duration: 0},
 				}, Loop: true})
-				sp := NewSavePoint(idle, act, float64(col)*float64(ld.TileSize), float64(row)*float64(ld.TileSize), ld.TileSize)
-				savePoints = append(savePoints, sp)
+				tileMap.SetTile(col, row, NewSavePointTile(idle, act))
 			}
 		}
 	}
 
-	player := NewPlayer(g.playerSprite, ld.PlayerSpawn.X, ld.PlayerSpawn.Y, TileSize)
-
+	player := NewPlayer(g.playerSprite, ld.PlayerSpawn.X, ld.PlayerSpawn.Y, ts)
 	g.Renderer.SetVSync(1)
+
 	cam := NewCamera(ScreenWidth, ScreenHeight)
 	if ld.Camera.Mode == "fixed" {
 		cam.SetFixed(ld.Camera.X, ld.Camera.Y)
@@ -239,8 +224,6 @@ func (g *Game) switchToLevel(idx int) error {
 	g.TileMap = tileMap
 	g.Player = player
 	g.Camera = cam
-	g.SavePoints = savePoints
-	g.Flags = flags
 	g.SpawnX = ld.PlayerSpawn.X
 	g.SpawnY = ld.PlayerSpawn.Y
 	g.showCongrats = false
@@ -278,12 +261,10 @@ func (g *Game) Run() error {
 			accumulator -= PhysicsDT
 		}
 
-		// Camera: per-frame exponential follow with real dt for smoothness.
 		if g.Camera.Mode != "fixed" {
 			g.Camera.SetTarget(g.Player.CenterX(), g.Player.CenterY())
 		}
 		g.Camera.Update(float64(dt)/1000.0, g.TileMap.PixelWidth(), g.TileMap.PixelHeight())
-
 		g.render()
 
 		elapsed := int64(sdl.Ticks() - now)
@@ -301,8 +282,7 @@ func (g *Game) fixedUpdate() {
 	respawnKey := keys[sdl.SCANCODE_R]
 
 	if interactKey && !g.interactWasHeld {
-		g.interactSavePoints()
-		g.interactFlags()
+		g.interactNearbyTiles()
 	}
 	g.interactWasHeld = interactKey
 
@@ -320,9 +300,7 @@ func (g *Game) fixedUpdate() {
 			g.showCongrats = false
 			if g.pendingLevel {
 				next := g.currentLevel + 1
-				if next >= len(g.levelPaths) {
-					next = 0
-				}
+				if next >= len(g.levelPaths) { next = 0 }
 				if err := g.switchToLevel(next); err != nil {
 					fmt.Printf("WARNING: level transition failed: %v\n", err)
 					g.pendingLevel = false
@@ -337,46 +315,35 @@ func (g *Game) fixedUpdate() {
 	g.Player.Update(g.TileMap, left, right, jump)
 
 	if !g.Player.Dead {
-		hitSpike := g.Player.CheckSpikeHit(g.TileMap)
-		fellOff := g.Player.Y > float64(g.TileMap.PixelHeight())+TileSize
-		if hitSpike || fellOff {
+		if g.Player.CheckSpikeHit(g.TileMap) || g.Player.Y > float64(g.TileMap.PixelHeight())+TileSize {
 			g.Player.Dead = true
 			g.Particles.Burst(g.Player.CenterX(), g.Player.CenterY(), 25, 1.0, 4.0, 500, 1200)
 		}
 	}
 
-	for _, sp := range g.SavePoints {
-		sp.Update(PhysicsDT)
-	}
 	g.TileMap.Update(PhysicsDT)
 	g.Particles.Update(PhysicsDT)
-
-	// Camera is updated per-frame in Run() for smooth exponential follow.
 }
 
-func (g *Game) interactFlags() {
+// interactNearbyTiles finds tiles within interaction range and calls their
+// OnInteract method.
+func (g *Game) interactNearbyTiles() {
 	px := g.Player.CenterX()
 	py := g.Player.CenterY()
-	for _, f := range g.Flags {
-		if math.Sqrt((px-f.CenterX())*(px-f.CenterX())+(py-f.CenterY())*(py-f.CenterY())) <= float64(SavePointInteractR) {
-			g.showCongrats = true
-			g.congratsTimer = 3000
-			g.pendingLevel = true
-			return
-		}
-	}
-}
+	r := float64(SavePointInteractR)
+	ts := float64(g.TileMap.TileWidth)
 
-func (g *Game) interactSavePoints() {
-	px := g.Player.CenterX()
-	py := g.Player.CenterY()
-	for _, sp := range g.SavePoints {
-		if math.Sqrt((px-sp.CenterX())*(px-sp.CenterX())+(py-sp.CenterY())*(py-sp.CenterY())) <= float64(SavePointInteractR) {
-			if sp.Activate() {
-				g.SpawnX = sp.CenterX() - float64(PlayerColW)/2
-				g.SpawnY = sp.Y + float64(sp.H) - float64(PlayerColH)
+	for _, tc := range g.TileMap.GetTilesInRect(px-r, py-r, r*2, r*2) {
+		t := g.TileMap.GetTile(tc[0], tc[1])
+		if it, ok := t.(Interactable); ok {
+			tx := float64(tc[0]) * ts
+			ty := float64(tc[1]) * ts
+			dx := px - (tx + ts/2)
+			dy := py - (ty + ts/2)
+			if math.Sqrt(dx*dx+dy*dy) <= r {
+				it.OnInteract(g, tc[0], tc[1])
+				return
 			}
-			return
 		}
 	}
 }
@@ -386,12 +353,6 @@ func (g *Game) render() {
 	g.Renderer.Clear()
 
 	g.TileMap.Render(g.Renderer, g.Camera)
-	for _, sp := range g.SavePoints {
-		sp.Render(g.Renderer, g.Camera)
-	}
-	for _, f := range g.Flags {
-		f.Render(g.Renderer, g.Camera)
-	}
 	g.Player.Render(g.Renderer, g.Camera)
 	g.Particles.Render(g.Renderer, g.Camera)
 
@@ -407,14 +368,8 @@ func (g *Game) render() {
 }
 
 func (g *Game) Cleanup() {
-	if g.Renderer != nil {
-		g.Renderer.Destroy()
-		g.Renderer = nil
-	}
-	if g.Window != nil {
-		g.Window.Destroy()
-		g.Window = nil
-	}
+	if g.Renderer != nil { g.Renderer.Destroy(); g.Renderer = nil }
+	if g.Window != nil { g.Window.Destroy(); g.Window = nil }
 	sdl.Quit()
 	for i := len(g.unloaders) - 1; i >= 0; i-- {
 		g.unloaders[i].Unload()

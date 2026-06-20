@@ -24,11 +24,12 @@ The project is a single `main` package in `src/`. Dependencies are managed by `g
 
 ### Entity design
 
-- **AnimatedSprite** — wraps an `*sdl.Texture` + map of named `Animation`s. Each `Animation` holds `[]AnimationFrame` (sub-rect + duration in ms). `SetAnimation(name)` switches states; `Update(dt)` advances the clock. Used by Player, TileDef, SavePoint, Flag, and ParticleSystem.
+- **AnimatedSprite** — wraps an `*sdl.Texture` + map of named `Animation`s. Each `Animation` holds `[]AnimationFrame` (sub-rect + duration in ms). `SetAnimation(name)` switches states; `Update(dt)` advances the clock. Used by Player, TileDef, and ParticleSystem.
+- **Tile interface** — unified abstraction for all map cells (`tile.go`). `Tile.Render()` / `Tile.Update()` for visuals; `Collider` interface for collision (`CollisionSolid` / `CollisionSpike`); `Interactable` interface for I-key actions. Implementations: `BrickTile`, `SpikeTile`, `SavePointTile`, `FlagTile`.
 - **ParticleSystem** — manages a pool of `Particle`s with velocity/lifetime. `Burst(x, y, n, …)` spawns n particles at a world position with random directions and speeds. Particles fade out (alpha based on remaining lifetime) and are removed when expired. Used for blood splatter on death.
 - **Player** — separate collision box (`PlayerColW`/`PlayerColH`, 20×26) and render size (passed at construction, defaults to `TileSize`=32). Physics (gravity, variable-height jump, double-jump) live in `Update()`. Ground detection uses `checkGround()` which explicitly scans tiles below the player's feet — this is the primary ground check, not overlap-based collision. `resolveX`/`resolveY` handle overlap ejection as a backup. On death (spike or fall) the `Dead` flag is set and blood particles burst — press **R** to respawn.
-- **TileMap** — grid of `TileDef` indices (-1 = empty). `TileDef` has an `AnimatedSprite` + `Solid` flag. Renders only visible tiles (camera-frustum culled). `GetTilesInRect()` for AABB queries.
-- **SavePoint** — two separate `AnimatedSprite`s (idle / activated). Activated on interact key (I) within `SavePointInteractR` radius. Timer expires after `SavePointActiveMS` ms. Sets player respawn point.
+- **TileMap** — grid of `Tile` interfaces. Each tile type implements `Tile` (Render/Update) and optionally `Collider` (Collision/Rotation) or `Interactable` (OnInteract). `BrickTile`/`SpikeTile`/`SavePointTile`/`FlagTile` all share this unified system. Renders only visible tiles (camera-frustum culled). `GetTilesInRect()` for AABB queries.
+- **SavePoint** — implement `Tile` + `Interactable`. Two `AnimatedSprite`s (idle / activated). Activated on I key within `SavePointInteractR` radius. Timer expires after `SavePointActiveMS` ms.
 - **Camera** — two modes: `"follow"` (spring-damper physics toward player centre: `force = stiffness*dx - damping*velocity`) and `"fixed"` (snaps to configured world position). Supports dead zone, max speed, `LockX`/`LockY`, offset, and stop threshold. Updated every frame with real dt for smooth, physics-based scrolling.
 
 ### Key physics details (constants.go)
