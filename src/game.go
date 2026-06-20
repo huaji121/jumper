@@ -23,6 +23,7 @@ type Game struct {
 	unloaders []unloader
 
 	Particles *ParticleSystem
+	Console   *Console
 	SpawnX    float64
 	SpawnY    float64
 
@@ -68,6 +69,7 @@ func NewGame() (*Game, error) {
 	g := &Game{
 		Window:   window,
 		Renderer: renderer,
+		Console:  NewConsole(),
 		Running:  true,
 		lastTick: sdl.Ticks(),
 		unloaders: []unloader{sdlLib, imgLib},
@@ -229,8 +231,7 @@ func (g *Game) switchToLevel(idx int) error {
 	g.showCongrats = false
 	g.interactWasHeld = true
 
-	fmt.Printf("[level %d] loaded: %s (spawn: %.0f, %.0f)\n",
-		idx+1, g.levelPaths[idx], g.SpawnX, g.SpawnY)
+	g.Console.Add(fmt.Sprintf("[level %d] loaded: %s", idx+1, g.levelPaths[idx]))
 
 	return nil
 }
@@ -243,6 +244,7 @@ func (g *Game) Run() error {
 			if event.Type == sdl.EVENT_QUIT {
 				g.Running = false
 			}
+			g.Console.HandleEvent(&event)
 		}
 		if !g.Running {
 			break
@@ -276,6 +278,12 @@ func (g *Game) Run() error {
 }
 
 func (g *Game) fixedUpdate() {
+	if g.Console.Visible {
+		g.TileMap.Update(PhysicsDT)
+		g.Particles.Update(PhysicsDT)
+		return
+	}
+
 	keys := sdl.GetKeyboardState()
 
 	interactKey := keys[sdl.SCANCODE_I]
@@ -302,7 +310,7 @@ func (g *Game) fixedUpdate() {
 				next := g.currentLevel + 1
 				if next >= len(g.levelPaths) { next = 0 }
 				if err := g.switchToLevel(next); err != nil {
-					fmt.Printf("WARNING: level transition failed: %v\n", err)
+					g.Console.Add(fmt.Sprintf("WARNING: %v", err))
 					g.pendingLevel = false
 				}
 			}
@@ -363,6 +371,8 @@ func (g *Game) render() {
 		cy := float32(g.Camera.H)/2 - ch/2
 		g.congratsSprite.Render(g.Renderer, cx, cy, cw, ch, sdl.FLIP_NONE, 0)
 	}
+
+	g.Console.Render(g.Renderer, ScreenWidth, ScreenHeight)
 
 	g.Renderer.Present()
 }
