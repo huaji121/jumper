@@ -3,11 +3,13 @@ package main
 import "github.com/Zyko0/go-sdl3/sdl"
 
 type Console struct {
-	Visible    bool
-	Messages   []string
-	Input      string
-	ScrollPos  int
-	MaxVisible int
+	Visible       bool
+	Messages      []string
+	Input         string
+	ScrollPos     int
+	MaxVisible    int
+	PendingCmd    string // set when Enter is pressed
+	HasPendingCmd bool
 }
 
 func NewConsole() *Console {
@@ -43,6 +45,8 @@ func (c *Console) HandleEvent(event *sdl.Event) {
 		if sc == sdl.SCANCODE_RETURN || sc == sdl.SCANCODE_KP_ENTER {
 			if c.Input != "" {
 				c.Add("> " + c.Input)
+				c.PendingCmd = c.Input
+				c.HasPendingCmd = true
 				c.Input = ""
 				c.ScrollPos = 0
 			}

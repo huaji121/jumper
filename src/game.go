@@ -24,6 +24,8 @@ type Game struct {
 
 	Particles *ParticleSystem
 	Console   *Console
+	Editor    *Editor
+	levelData LevelData // current level's parsed data
 	SpawnX    float64
 	SpawnY    float64
 
@@ -170,6 +172,17 @@ func (g *Game) loadTextures() error {
 	}, Loop: true})
 	g.Particles = NewParticleSystem(bloodSprite)
 
+	t, err = img.LoadTexture(g.Renderer, "assets/textures/cross.png")
+	if err != nil {
+		return fmt.Errorf("load cross.png: %w", err)
+	}
+	t.SetScaleMode(sdl.SCALEMODE_NEAREST)
+	crossSprite := NewAnimatedSprite(t)
+	crossSprite.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+		{X: 0, Y: 0, W: crossSprite.TexW, H: crossSprite.TexH, Duration: 0},
+	}, Loop: true})
+	g.Editor = NewEditor(crossSprite)
+
 	return nil
 }
 
@@ -184,6 +197,8 @@ func (g *Game) switchToLevel(idx int) error {
 	if err != nil {
 		return err
 	}
+
+	g.levelData = *ld
 
 	tileMap := NewTileMap(ld.Width, ld.Height, ld.TileSize, ld.TileSize)
 	ts := ld.TileSize
@@ -263,6 +278,20 @@ func (g *Game) Run() error {
 				g.Running = false
 			}
 			g.Console.HandleEvent(&event)
+			if g.Editor.Enabled {
+				switch event.Type {
+				case sdl.EVENT_MOUSE_BUTTON_DOWN:
+					btn := event.MouseButtonEvent()
+					if btn.Button == 1 {
+						g.Editor.MouseLeft = true
+					} else if btn.Button == 3 {
+						g.Editor.MouseRight = true
+					}
+				case sdl.EVENT_MOUSE_MOTION:
+					mot := event.MouseMotionEvent()
+					g.Editor.MouseX, g.Editor.MouseY = mot.X, mot.Y
+				}
+			}
 		}
 		if !g.Running {
 			break
@@ -297,6 +326,10 @@ func (g *Game) Run() error {
 
 func (g *Game) fixedUpdate() {
 	if g.Console.Visible {
+		if g.Console.HasPendingCmd {
+			g.Editor.HandleCommand(g, g.Console.PendingCmd)
+			g.Console.HasPendingCmd = false
+		}
 		g.TileMap.Update(PhysicsDT)
 		g.Particles.Update(PhysicsDT)
 		return
@@ -335,12 +368,17 @@ func (g *Game) fixedUpdate() {
 		}
 	}
 
+	g.Editor.Update(g.Camera, keys)
+	g.Editor.HandleMouse(g)
+
 	left := keys[sdl.SCANCODE_A]
 	right := keys[sdl.SCANCODE_D]
 	jump := keys[sdl.SCANCODE_J] || keys[sdl.SCANCODE_W] || keys[sdl.SCANCODE_SPACE]
-	g.Player.Update(g.TileMap, left, right, jump)
+	if !g.Editor.Enabled {
+		g.Player.Update(g.TileMap, left, right, jump)
+	}
 
-	if !g.Player.Dead {
+	if !g.Player.Dead && !g.Editor.Enabled {
 		if g.Player.CheckSpikeHit(g.TileMap) || g.Player.Y > float64(g.TileMap.PixelHeight())+TileSize {
 			g.Player.Dead = true
 			g.Particles.Burst(g.Player.CenterX(), g.Player.CenterY(), 25, 1.0, 4.0, 500, 1200)
@@ -381,6 +419,7 @@ func (g *Game) render() {
 	g.TileMap.Render(g.Renderer, g.Camera)
 	g.Player.Render(g.Renderer, g.Camera)
 	g.Particles.Render(g.Renderer, g.Camera)
+	g.Editor.Render(g.Renderer, g.Camera)
 
 	if g.showCongrats {
 		cw := float32(g.congratsSprite.TexW)
