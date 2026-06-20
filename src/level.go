@@ -92,9 +92,32 @@ func LoadLevel(path string) (*LevelData, error) {
 		return nil, fmt.Errorf("%s: expected %d tile rows, got %d", path, ld.Height, len(ld.Tiles))
 	}
 	for i, row := range ld.Tiles {
-		if len(row) != ld.Width {
-			return nil, fmt.Errorf("%s: row %d expected %d cols, got %d", path, i, ld.Width, len(row))
+		if cellCount(row) != ld.Width {
+			return nil, fmt.Errorf("%s: row %d expected %d cells, got %d", path, i, ld.Width, cellCount(row))
 		}
 	}
 	return &ld, nil
+}
+
+// cellCount returns the number of logical cells in a tile row.  Single
+// characters count as one cell; [...] sequences count as one cell.
+func cellCount(row string) int {
+	n := 0
+	for i := 0; i < len(row); {
+		if row[i] == '[' {
+			end := i + 1
+			for end < len(row) && row[end] != ']' {
+				end++
+			}
+			if end < len(row) {
+				i = end + 1
+			} else {
+				i++
+			}
+		} else {
+			i++
+		}
+		n++
+	}
+	return n
 }

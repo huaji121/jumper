@@ -189,29 +189,47 @@ func (g *Game) switchToLevel(idx int) error {
 	ts := ld.TileSize
 
 	for row, line := range ld.Tiles {
-		for col, ch := range line {
-			pat, ok := ld.Pattern[string(ch)]
-			if !ok || pat.Type == "" {
-				continue
+		col := 0
+		for i := 0; i < len(line); {
+			var key string
+			advance := 1
+
+			if line[i] == '[' {
+				end := i + 1
+				for end < len(line) && line[end] != ']' {
+					end++
+				}
+				if end < len(line) {
+					key = line[i+1 : end]
+					advance = end - i + 1
+				}
+			} else {
+				key = string(line[i])
 			}
-			switch pat.Type {
-			case "bricks":
-				tileMap.SetTile(col, row, &BrickTile{sprite: g.brickSprite})
-			case "spike":
-				tileMap.SetTile(col, row, &SpikeTile{sprite: g.spikeSprite, rotation: pat.Rotation})
-			case "flag":
-				tileMap.SetTile(col, row, &FlagTile{sprite: g.flagSprite})
-			case "save_point":
-				idle := NewAnimatedSprite(g.spTex)
-				idle.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
-					{X: 0, Y: 0, W: idle.TexW, H: idle.TexH, Duration: 0},
-				}, Loop: true})
-				act := NewAnimatedSprite(g.spActTex)
-				act.AddAnimation(&Animation{Name: "activated", Frames: []AnimationFrame{
-					{X: 0, Y: 0, W: act.TexW, H: act.TexH, Duration: 0},
-				}, Loop: true})
-				tileMap.SetTile(col, row, NewSavePointTile(idle, act))
+
+			pat, ok := ld.Pattern[key]
+			if ok && pat.Type != "" {
+				switch pat.Type {
+				case "bricks":
+					tileMap.SetTile(col, row, &BrickTile{sprite: g.brickSprite})
+				case "spike":
+					tileMap.SetTile(col, row, &SpikeTile{sprite: g.spikeSprite, rotation: pat.Rotation})
+				case "flag":
+					tileMap.SetTile(col, row, &FlagTile{sprite: g.flagSprite})
+				case "save_point":
+					idle := NewAnimatedSprite(g.spTex)
+					idle.AddAnimation(&Animation{Name: "idle", Frames: []AnimationFrame{
+						{X: 0, Y: 0, W: idle.TexW, H: idle.TexH, Duration: 0},
+					}, Loop: true})
+					act := NewAnimatedSprite(g.spActTex)
+					act.AddAnimation(&Animation{Name: "activated", Frames: []AnimationFrame{
+						{X: 0, Y: 0, W: act.TexW, H: act.TexH, Duration: 0},
+					}, Loop: true})
+					tileMap.SetTile(col, row, NewSavePointTile(idle, act))
+				}
 			}
+			col++
+			i += advance
 		}
 	}
 
